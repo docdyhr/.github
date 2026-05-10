@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/docdyhr/.github/blob/main/SECURITY.md
+    about: Do not open a public issue — follow the private disclosure process.
+  - name: Question or general discussion
+    url: https://github.com/docdyhr/.github/discussions
+    about: Ask questions and discuss ideas in GitHub Discussions.

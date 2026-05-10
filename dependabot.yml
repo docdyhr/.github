@@ -1,0 +1,15 @@
+# Dependabot config for the docdyhr/.github repo itself.
+# Individual repos maintain their own .github/dependabot.yml
+# tailored to their ecosystem(s).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 10
