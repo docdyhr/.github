@@ -21,6 +21,15 @@ Consumer repos carry only a thin caller (≤ 60 lines). To deploy an improvement
 
 Caller templates for new consumers: `workflow-templates/`
 
+## Orchestrator (this repo only)
+
+`claude-maintenance-orchestrator.yml` — Cross-repo scheduled maintenance. Runs directly from this repo (not a reusable workflow). Requires `GH_ORG_TOKEN` secret set in this repo's settings.
+
+| Schedule (UTC) | Task |
+|---|---|
+| Sunday 06:00 | `dependabot` — triage Dependabot PRs across all T1+T2 repos |
+| Monday 07:00 | `status` — health check all T1+T2 repos, create issue if CRITICAL |
+
 ## Re-tagging v1 (deploy improvements)
 
 ```bash
@@ -49,12 +58,9 @@ All consumers pick up the change automatically on next run — no PR required.
 | T3 helper | homebrew-tap, homebrew-versiontracker | Trimmed: homebrew-bump caller + ruby tests only |
 | T4 legacy | pigame, mac_changer, ansible-keyring, DALL-E-Image-Generator-Script, AppleScriptUtils | Leave alone unless reopened |
 
-## Scheduled maintenance (Phase 5 target)
+## Scheduled maintenance
 
-| Day (UTC) | Time | Workflow | Mode |
-|---|---|---|---|
-| Sun | 06:00 | `claude-dependabot-merge` | dry-run |
-| Mon | 07:00 | `claude-status-check` | report → issue |
+Implemented in `claude-maintenance-orchestrator.yml` (Phase 5). See Orchestrator section above.
 
 ## Phases
 
@@ -65,4 +71,4 @@ All consumers pick up the change automatically on next run — no PR required.
 | 2 — Reusable workflows | ✅ Done | claude-dependabot-merge + claude-status-check; all 3 consumers migrated |
 | 3 — Claude Code skills | 🔄 Active | repo-audit, workflow-migrate |
 | 4 — Hooks | Planned | auto-format, tests-before-stop |
-| 5 — Scheduled maintenance | Planned | Cross-repo orchestrator in this repo |
+| 5 — Scheduled maintenance | ✅ Done | Cross-repo orchestrator in this repo (`claude-maintenance-orchestrator.yml`) |

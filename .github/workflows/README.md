@@ -35,5 +35,8 @@ jobs:
 |---|---|---|
 | `claude-dependabot-merge.yml` | Headless Claude evaluation + merge of Dependabot PRs | `v1` |
 | `claude-status-check.yml` | Weekly repo health check — PRs, CI, issues, Dependabot, stale branches | `v1` |
+| `claude-maintenance-orchestrator.yml` | Cross-repo scheduled orchestrator — runs health checks and Dependabot triage across all T1+T2 repos from this repo on a schedule | — |
 
-More to come in Phase 2: `python-ci.yml`, `node-ci.yml`, `rust-ci.yml`, `release-*.yml`, `homebrew-bump.yml`, `stale.yml`.
+`claude-maintenance-orchestrator.yml` is not a reusable workflow — it runs directly from this repo via `schedule` and `workflow_dispatch`. It requires the `GH_ORG_TOKEN` secret (fine-grained PAT with `contents:read` + `pull-requests:read` for all target repos).
+
+More to come: `python-ci.yml`, `node-ci.yml`, `rust-ci.yml`, `release-*.yml`, `homebrew-bump.yml`, `stale.yml`.
