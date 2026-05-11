@@ -34,5 +34,6 @@ jobs:
 | Name | Purpose | Tag |
 |---|---|---|
 | `claude-dependabot-merge.yml` | Headless Claude evaluation + merge of Dependabot PRs | `v1` |
+| `claude-status-check.yml` | Weekly repo health check — PRs, CI, issues, Dependabot, stale branches | `v1` |
 
-More to come in Phase 2: `claude-status-check.yml`, `python-ci.yml`, `node-ci.yml`, `rust-ci.yml`, `release-*.yml`, `homebrew-bump.yml`, `stale.yml`.
+More to come in Phase 2: `python-ci.yml`, `node-ci.yml`, `rust-ci.yml`, `release-*.yml`, `homebrew-bump.yml`, `stale.yml`.
