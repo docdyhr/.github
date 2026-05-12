@@ -1,0 +1,585 @@
+# .github/workflows/claude-maintenance-orchestrator.yml
+#
+# Cross-repo scheduled maintenance orchestrator for the docdyhr org.
+#
+# Runs FROM this (.github) repo on a schedule and reaches out to all T1+T2
+# repos using the GH_ORG_TOKEN secret. One Claude headless session per run
+# iterates over every target repo and generates a combined markdown report.
+#
+# Schedule (all times UTC):
+#   Sunday  06:00  →  dependabot task (triage Dependabot PRs across all repos)
+#   Monday  07:00  →  status task    (health check all repos, create issue if CRITICAL)
+#
+# ─── Secrets (set in docdyhr/.github repo settings) ──────────────────────────
+#   ANTHROPIC_API_KEY  — Claude API key (required)
+#   GH_ORG_TOKEN       — Fine-grained PAT with contents:read + pull-requests:read
+#                        for all T1+T2 repos. Without this, cross-repo gh calls
+#                        will 404 and each repo section will show "N/A".
+#   SLACK_WEBHOOK_URL  — Incoming webhook (optional)
+#
+# ─── Manual trigger ──────────────────────────────────────────────────────────
+# Use the "Run workflow" button in Actions, or:
+#   gh workflow run claude-maintenance-orchestrator.yml \
+#     --field tasks=all \
+#     --field max_budget_usd=2.00
+
+name: Claude Maintenance Orchestrator
+
+on:
+  schedule:
+    - cron: "0 6 * * 0" # Sunday  06:00 UTC — Dependabot triage
+    - cron: "0 7 * * 1" # Monday  07:00 UTC — Health status check
+
+  workflow_dispatch:
+    inputs:
+      tasks:
+        description: "Tasks to run: status, dependabot, or all"
+        type: choice
+        options: [all, status, dependabot]
+        default: all
+      max_budget_usd:
+        description: "Max Claude API spend (USD)"
+        type: string
+        default: "2.00"
+      create_summary_issue:
+        description: "Create issue in this repo when CRITICAL repos are found"
+        type: boolean
+        default: true
+      node_version:
+        description: "Node.js version for Claude Code CLI"
+        type: string
+        default: "20"
+
+# Only one orchestrator run at a time — never interleave cross-repo writes.
+concurrency:
+  group: claude-maintenance-orchestrator
+  cancel-in-progress: false
+
+env:
+  ARTIFACT_PREFIX: "cross-repo-maintenance"
+
+jobs:
+  # ── Pre-flight ────────────────────────────────────────────────────────────────
+  preflight:
+    name: Pre-flight
+    runs-on: ubuntu-latest
+    outputs:
+      effective_tasks: ${{ steps.resolve.outputs.effective_tasks }}
+      max_budget: ${{ steps.resolve.outputs.max_budget }}
+      run_label: ${{ steps.resolve.outputs.run_label }}
+      create_issue: ${{ steps.resolve.outputs.create_issue }}
+      node_version: ${{ steps.resolve.outputs.node_version }}
+      has_org_token: ${{ steps.resolve.outputs.has_org_token }}
+
+    steps:
+      - name: Resolve effective parameters
+        id: resolve
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          TRIGGER="${{ github.event_name }}"
+          RUN_LABEL="$(date -u '+%Y-%m-%d')"
+
+          # Schedule trigger: derive task from cron expression
+          if [[ "$TRIGGER" == "schedule" ]]; then
+            case "$SCHEDULE" in
+              "0 6 * * 0") EFFECTIVE_TASKS="dependabot" ;;
+              "0 7 * * 1") EFFECTIVE_TASKS="status"     ;;
+              *)            EFFECTIVE_TASKS="all"        ;;
+            esac
+            CREATE_ISSUE="true"
+            MAX_BUDGET="2.00"
+            NODE_VERSION="20"
+          else
+            EFFECTIVE_TASKS="${{ inputs.tasks || 'all' }}"
+            CREATE_ISSUE="${{ inputs.create_summary_issue || 'true' }}"
+            MAX_BUDGET="${{ inputs.max_budget_usd || '2.00' }}"
+            NODE_VERSION="${{ inputs.node_version || '20' }}"
+          fi
+
+          HAS_ORG_TOKEN="false"
+          [[ -n "${{ secrets.GH_ORG_TOKEN }}" ]] && HAS_ORG_TOKEN="true"
+
+          {
+            echo "effective_tasks=${EFFECTIVE_TASKS}"
+            echo "max_budget=${MAX_BUDGET}"
+            echo "run_label=${RUN_LABEL}"
+            echo "create_issue=${CREATE_ISSUE}"
+            echo "node_version=${NODE_VERSION}"
+            echo "has_org_token=${HAS_ORG_TOKEN}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Pre-flight"
+            echo "| Parameter | Value |"
+            echo "|---|---|"
+            echo "| Trigger | \`${TRIGGER}\` |"
+            echo "| Schedule | \`${SCHEDULE:-n/a}\` |"
+            echo "| Tasks | \`${EFFECTIVE_TASKS}\` |"
+            echo "| Budget cap | \$${MAX_BUDGET} |"
+            echo "| Create issue | ${CREATE_ISSUE} |"
+            echo "| Org token | ${HAS_ORG_TOKEN} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$HAS_ORG_TOKEN" == "false" ]]; then
+            echo "::warning::GH_ORG_TOKEN is not set. Cross-repo gh calls will use GITHUB_TOKEN, which only has access to this (.github) repo. Set GH_ORG_TOKEN for full cross-repo coverage."
+          fi
+
+      - name: Verify ANTHROPIC_API_KEY
+        run: |
+          if [[ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]]; then
+            echo "::error::ANTHROPIC_API_KEY secret is not set. Add it at: Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "✅ ANTHROPIC_API_KEY present"
+
+  # ── Orchestrate all repos in one Claude session ───────────────────────────────
+  orchestrate:
+    name: Orchestrate (${{ needs.preflight.outputs.effective_tasks }})
+    needs: preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      has_critical: ${{ steps.parse.outputs.has_critical }}
+      critical_repos: ${{ steps.parse.outputs.critical_repos }}
+      cost_usd: ${{ steps.claude.outputs.cost_usd }}
+      report_path: ${{ steps.prep.outputs.report_path }}
+      summary_excerpt: ${{ steps.parse.outputs.summary_excerpt }}
+
+    steps:
+      - name: Set up Node.js ${{ needs.preflight.outputs.node_version }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ needs.preflight.outputs.node_version }}
+
+      - name: Install Claude Code CLI
+        run: |
+          npm install -g @anthropic-ai/claude-code@latest
+          echo "Claude version: $(claude --version)"
+
+      - name: Prepare report directory
+        id: prep
+        run: |
+          REPORT_DIR="${RUNNER_TEMP}/maintenance-report"
+          mkdir -p "$REPORT_DIR"
+          echo "report_path=${REPORT_DIR}" >> "$GITHUB_OUTPUT"
+          echo "REPORT_DIR=${REPORT_DIR}"  >> "$GITHUB_ENV"
+
+      - name: Build orchestration prompt
+        id: prompt
+        env:
+          TASKS: ${{ needs.preflight.outputs.effective_tasks }}
+          RUN_LABEL: ${{ needs.preflight.outputs.run_label }}
+        run: |
+          # ── T1 + T2 repos (update when org changes) ──────────────────────────
+          cat > "${RUNNER_TEMP}/repos.txt" << 'REPOS_EOF'
+          docdyhr/mcp-wordpress
+          docdyhr/simplenote-mcp-server
+          docdyhr/batless
+          docdyhr/drop2md
+          docdyhr/versiontracker
+          docdyhr/malwarespotter
+          docdyhr/httpcheck
+          docdyhr/macwhisper-mcp-server
+          REPOS_EOF
+
+          # Strip leading whitespace introduced by heredoc indent
+          sed -i 's/^[[:space:]]*//' "${RUNNER_TEMP}/repos.txt"
+          REPO_COUNT=$(wc -l < "${RUNNER_TEMP}/repos.txt" | tr -d ' ')
+          REPO_LIST=$(sed 's/^/  - /' "${RUNNER_TEMP}/repos.txt")
+
+          # ── Task-specific instruction blocks ─────────────────────────────────
+          if [[ "$TASKS" == "all" || "$TASKS" == *"status"* ]]; then
+            STATUS_INSTRUCTIONS=$(cat << 'TASK_EOF'
+          ### Task A — Repository Health Status
+
+          For each repository, fetch and analyse:
+
+          1. Open pull requests (last 20):
+               gh pr list --repo <REPO> --state open --limit 20 \
+                 --json number,title,createdAt,isDraft,reviewDecision,statusCheckRollup
+             - Flag PRs older than 7 days with no review as STALE.
+             - Flag PRs where CI is failing.
+
+          2. Recent CI runs (last 5):
+               gh run list --repo <REPO> --limit 5 \
+                 --json name,conclusion,headBranch,createdAt
+             - Flag failures on the default branch as HIGH PRIORITY.
+
+          3. Open issues (last 20):
+               gh issue list --repo <REPO> --state open --limit 20 \
+                 --json number,title,createdAt,labels
+             - Count bug-labelled issues separately.
+
+          4. Open Dependabot alerts:
+               gh api repos/<REPO>/dependabot/alerts \
+                 --jq '[.[] | select(.state=="open")] | group_by(.security_advisory.severity)' 2>/dev/null || echo "[]"
+             - Tally by severity: critical, high, medium, low.
+
+          Classify each repo as:
+            HEALTHY         — CI green on default branch, no critical/high alerts, no stale PRs over 14 days
+            NEEDS_ATTENTION — stale PRs, minor dependency issues, or non-critical alerts
+            CRITICAL        — CI failing on default branch, OR critical/high security alerts, OR exposed secrets
+          TASK_EOF
+          )
+          else
+            STATUS_INSTRUCTIONS="(status task not requested this run)"
+          fi
+
+          if [[ "$TASKS" == "all" || "$TASKS" == *"dependabot"* ]]; then
+            DEPENDABOT_INSTRUCTIONS=$(cat << 'TASK_EOF'
+          ### Task B — Dependabot PR Triage
+
+          For each repository, fetch open non-draft Dependabot PRs:
+            gh pr list --repo <REPO> --state open --author "app/dependabot" \
+              --json number,title,headRefName,isDraft,labels,createdAt
+
+          For each open non-draft Dependabot PR, check CI status:
+            gh pr checks <NUMBER> --repo <REPO> --json name,conclusion,required
+
+          Classify each PR:
+            READY_TO_MERGE — all CI checks passing or skipped, no required review
+            PENDING_CI     — at least one check still in_progress or queued
+            FAILING_CI     — at least one required check has conclusion failure/error
+            NEEDS_REVIEW   — branch protection requires a human review approval
+          TASK_EOF
+          )
+          else
+            DEPENDABOT_INSTRUCTIONS="(dependabot task not requested this run)"
+          fi
+
+          # ── Write prompt file ─────────────────────────────────────────────────
+          PROMPT_FILE="${RUNNER_TEMP}/orchestrator-prompt.txt"
+
+          cat > "$PROMPT_FILE" << PROMPT_EOF
+          You are a cross-repository maintenance orchestrator for the docdyhr GitHub organisation.
+
+          Run date: ${RUN_LABEL}
+          Tasks:    ${TASKS}
+          Repos (${REPO_COUNT} total):
+          ${REPO_LIST}
+
+          Work through every repository in the list. Use only the gh CLI and jq.
+          If a repo returns 404 or 403 for any call, write "N/A" for that field and continue.
+          Do NOT skip any repo — process all of them, one at a time, in order.
+
+          ${STATUS_INSTRUCTIONS}
+
+          ${DEPENDABOT_INSTRUCTIONS}
+
+          ── Required output ──────────────────────────────────────────────────────
+
+          After processing all repositories, emit a single Markdown document with EXACTLY
+          the following structure (parse markers must appear verbatim):
+
+          <!-- ORCHESTRATOR_REPORT_START -->
+          # Cross-Repo Maintenance Report — ${RUN_LABEL}
+
+          **Repos processed:** ${REPO_COUNT}
+          **Tasks:** ${TASKS}
+          **Generated:** YYYY-MM-DD HH:MM UTC
+
+          ## Repository Health Overview
+
+          | Repository | Health | Open PRs | CI (last 5) | Open Issues | Dependabot Alerts | Notes |
+          |---|---|---|---|---|---|---|
+          (one row per repo — Health must be one of: HEALTHY / NEEDS_ATTENTION / CRITICAL)
+
+          ## Dependabot PR Summary
+
+          | Repository | PR | Package | CI Status | Classification |
+          |---|---|---|---|---|
+          (one row per open Dependabot PR; write "None found across all repos" if none)
+
+          ## CRITICAL Repositories
+
+          (Bulleted list, one entry per CRITICAL repo with specific issues found.
+          If none write exactly: "None — all repos healthy.")
+
+          ## Aggregate Summary
+
+          - **Repos checked:** N
+          - **Healthy:** N
+          - **Needs attention:** N
+          - **Critical:** N
+          - **Total open Dependabot PRs:** N
+          - **Ready to merge (Dependabot):** N
+          - **Total open issues:** N
+          - **Total open PRs:** N
+          <!-- ORCHESTRATOR_REPORT_END -->
+          PROMPT_EOF
+
+          echo "Prompt written ($(wc -c < "$PROMPT_FILE") bytes, ${REPO_COUNT} repos)"
+
+      - name: Run Claude headless orchestration
+        id: claude
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Use org-level token when available; falls back to GITHUB_TOKEN (this repo only).
+          GH_TOKEN: ${{ secrets.GH_ORG_TOKEN != '' && secrets.GH_ORG_TOKEN || github.token }}
+        run: |
+          OUTPUT_FILE="${REPORT_DIR}/claude-output.json"
+          REPORT_FILE="${REPORT_DIR}/report.md"
+          MAX_BUDGET="${{ needs.preflight.outputs.max_budget }}"
+
+          claude \
+            --print \
+            --allowedTools \
+              "Bash(gh pr list:*),Bash(gh pr checks:*),Bash(gh pr view:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh issue list:*),Bash(gh api:*),Bash(gh repo list:*),Bash(gh repo view:*),Bash(jq:*),Bash(echo:*),Bash(cat:*),Bash(wc:*)" \
+            --output-format json \
+            --max-budget-usd "${MAX_BUDGET}" \
+            --no-session-persistence \
+            "$(cat "${RUNNER_TEMP}/orchestrator-prompt.txt")" \
+            > "$OUTPUT_FILE" 2>&1
+
+          CLAUDE_EXIT=$?
+          if [[ $CLAUDE_EXIT -ne 0 ]]; then
+            echo "::error::claude exited with code ${CLAUDE_EXIT}. See artifact for details."
+            cat "$OUTPUT_FILE" >&2
+            exit $CLAUDE_EXIT
+          fi
+
+          RESULT_TEXT=$(jq -r '.result // "ERROR: no result field in claude output"' "$OUTPUT_FILE")
+          COST=$(jq -r '.cost_usd // "unknown"' "$OUTPUT_FILE")
+
+          echo "API cost: \$${COST}"
+          echo "cost_usd=${COST}" >> "$GITHUB_OUTPUT"
+
+          {
+            printf '# Cross-Repo Maintenance Report\n\n'
+            printf '**Generated:** %s UTC\n' "$(date -u '+%Y-%m-%d %H:%M:%S')"
+            printf '**Trigger:** `%s`\n' "${{ github.event_name }}"
+            printf '**Tasks:** `%s`\n' "${{ needs.preflight.outputs.effective_tasks }}"
+            printf '**Claude cost:** $%s\n\n' "${COST}"
+            printf -- '---\n\n'
+            printf '%s\n' "$RESULT_TEXT"
+          } > "$REPORT_FILE"
+
+          echo "Report written: ${REPORT_FILE} ($(wc -l < "$REPORT_FILE") lines)"
+
+      - name: Parse aggregate results
+        id: parse
+        run: |
+          REPORT_FILE="${REPORT_DIR}/report.md"
+
+          # Extract the structured block between parse markers
+          REPORT_BLOCK=$(awk \
+            '/<!-- ORCHESTRATOR_REPORT_START -->/,/<!-- ORCHESTRATOR_REPORT_END -->/' \
+            "$REPORT_FILE")
+
+          # Find CRITICAL repos (rows in the health overview table tagged CRITICAL)
+          CRITICAL_REPOS=$(echo "$REPORT_BLOCK" | \
+            grep -i '| CRITICAL' | \
+            grep -oP 'docdyhr/[a-zA-Z0-9_.-]+' | \
+            sort -u | tr '\n' ',' | sed 's/,$//')
+
+          HAS_CRITICAL="false"
+          [[ -n "$CRITICAL_REPOS" ]] && HAS_CRITICAL="true"
+
+          # Extract aggregate summary (up to 15 lines)
+          SUMMARY_EXCERPT=$(echo "$REPORT_BLOCK" | \
+            awk '/## Aggregate Summary/,/<!-- ORCHESTRATOR_REPORT_END -->/' | \
+            grep -v 'ORCHESTRATOR_REPORT_END' | head -15)
+
+          {
+            echo "has_critical=${HAS_CRITICAL}"
+            echo "critical_repos=${CRITICAL_REPOS}"
+            echo "summary_excerpt<<SUMMARY_EOF"
+            echo "$SUMMARY_EXCERPT"
+            echo "SUMMARY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          # ── Step summary ──────────────────────────────────────────────────────
+          {
+            echo "## Cross-Repo Maintenance Results"
+            echo ""
+            if [[ "$HAS_CRITICAL" == "true" ]]; then
+              echo "### 🔴 CRITICAL repos detected"
+              echo ""
+              echo "\`${CRITICAL_REPOS}\`"
+            else
+              echo "### ✅ No critical issues found"
+            fi
+            echo ""
+            echo "$SUMMARY_EXCERPT"
+            echo ""
+            echo "**API cost:** \$${{ steps.claude.outputs.cost_usd }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.ARTIFACT_PREFIX }}-${{ needs.preflight.outputs.run_label }}
+          path: ${{ steps.prep.outputs.report_path }}/
+          retention-days: 90
+          if-no-files-found: error
+
+  # ── Create summary issue when CRITICAL repos are found ───────────────────────
+  create-summary-issue:
+    name: Create summary issue (CRITICAL)
+    needs: [preflight, orchestrate]
+    runs-on: ubuntu-latest
+    if: |
+      needs.orchestrate.outputs.has_critical == 'true' &&
+      needs.preflight.outputs.create_issue == 'true'
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - name: Ensure labels exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create "org-health" \
+            --color "d93f0b" \
+            --description "Cross-repo org maintenance alerts" \
+            --repo "${{ github.repository }}" \
+            2>/dev/null || true
+          gh label create "automated" \
+            --color "0075ca" \
+            --description "Created by an automated workflow" \
+            --repo "${{ github.repository }}" \
+            2>/dev/null || true
+
+      - name: Check for open duplicate this week
+        id: dedup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          WEEK_LABEL="$(date -u '+%Y-W%V')"
+          EXISTING=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "org-health,automated" \
+            --state open \
+            --json number,title \
+            --jq ".[] | select(.title | contains(\"${WEEK_LABEL}\")) | .number" \
+            | head -1)
+
+          if [[ -n "$EXISTING" ]]; then
+            echo "Duplicate found: issue #${EXISTING} — skipping creation."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No duplicate for week ${WEEK_LABEL} — will create."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create CRITICAL summary issue
+        if: steps.dedup.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          WEEK_LABEL="$(date -u '+%Y-W%V')"
+          DATE_LABEL="${{ needs.preflight.outputs.run_label }}"
+          CRITICAL_REPOS="${{ needs.orchestrate.outputs.critical_repos }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          SUMMARY_EXCERPT="${{ needs.orchestrate.outputs.summary_excerpt }}"
+
+          # Build checklist of critical repos
+          REPO_CHECKLIST=$(echo "$CRITICAL_REPOS" | tr ',' '\n' | while read -r r; do
+            [[ -z "$r" ]] && continue
+            printf '- [ ] [`%s`](https://github.com/%s)\n' "$r" "$r"
+          done)
+
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "🔴 Org Health Alert [${WEEK_LABEL}]: CRITICAL repos — ${DATE_LABEL}" \
+            --label "org-health,automated" \
+            --body "$(cat << EOF
+          ## 🔴 Cross-Repo Maintenance Alert — ${DATE_LABEL}
+
+          The scheduled maintenance orchestrator found **CRITICAL** issues.
+
+          **Workflow run:** ${RUN_URL}
+          **Week:** ${WEEK_LABEL}
+          **Tasks run:** ${{ needs.preflight.outputs.effective_tasks }}
+
+          ### Repositories requiring immediate attention
+
+          ${REPO_CHECKLIST}
+
+          ---
+
+          ${SUMMARY_EXCERPT}
+
+          ---
+
+          <details>
+          <summary>How to investigate</summary>
+
+          1. Download the full report from the [workflow artifacts](${RUN_URL}).
+          2. Navigate to the critical repo and run \`/status\` in Claude Code.
+          3. For Dependabot issues, run \`/dependabot-triage\` in the affected repo.
+
+          </details>
+
+          ---
+          *Generated by [claude-maintenance-orchestrator](${{ github.server_url }}/${{ github.repository }}/actions/workflows/claude-maintenance-orchestrator.yml)*
+          EOF
+          )" \
+          | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # ── Slack notification ────────────────────────────────────────────────────────
+  notify-slack:
+    name: Slack notification
+    needs: [preflight, orchestrate]
+    runs-on: ubuntu-latest
+    if: always() && needs.orchestrate.result == 'success'
+
+    steps:
+      - name: Post Slack summary
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          HAS_CRITICAL: ${{ needs.orchestrate.outputs.has_critical }}
+          CRITICAL_REPOS: ${{ needs.orchestrate.outputs.critical_repos }}
+          TASKS: ${{ needs.preflight.outputs.effective_tasks }}
+          COST: ${{ needs.orchestrate.outputs.cost_usd }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [[ "$HAS_CRITICAL" == "true" ]]; then
+            ICON="🔴"
+            TITLE="${ICON} *Org Maintenance: CRITICAL issues found*"
+            DETAIL="Critical repos: \`${CRITICAL_REPOS}\`"
+          else
+            ICON="✅"
+            TITLE="${ICON} *Org Maintenance: All repos healthy*"
+            DETAIL="T1+T2 repos checked — no critical issues"
+          fi
+
+          PAYLOAD=$(jq -n \
+            --arg title   "$TITLE"           \
+            --arg detail  "$DETAIL"          \
+            --arg tasks   "$TASKS"           \
+            --arg cost    "${COST:-unknown}" \
+            --arg run_url "$RUN_URL"         \
+            '{
+              blocks: [
+                { type: "section", text: { type: "mrkdwn", text: $title } },
+                {
+                  type: "section",
+                  fields: [
+                    { type: "mrkdwn", text: ("*Detail:*\n"  + $detail)  },
+                    { type: "mrkdwn", text: ("*Tasks:*\n"   + $tasks)   },
+                    { type: "mrkdwn", text: ("*Cost:*\n$"   + $cost)    },
+                    { type: "mrkdwn", text: ("*Report:*\n<" + $run_url + "|View in Actions>") }
+                  ]
+                }
+              ]
+            }')
+
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "$SLACK_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          if [[ "$HTTP_STATUS" != "200" ]]; then
+            echo "::warning::Slack returned HTTP ${HTTP_STATUS} — notification may not have delivered."
+          else
+            echo "Slack notification sent (HTTP 200)."
+          fi
+
+      - name: Skip (SLACK_WEBHOOK_URL not configured)
+        if: ${{ secrets.SLACK_WEBHOOK_URL == '' }}
+        run: echo "SLACK_WEBHOOK_URL not set — skipping Slack notification."

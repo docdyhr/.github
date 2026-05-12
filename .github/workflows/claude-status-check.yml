@@ -114,12 +114,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -294,7 +294,7 @@ jobs:
           echo "**Run ID:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report as artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_PREFIX }}-${{ needs.preflight.outputs.run_label }}
           path: ${{ steps.report.outputs.path }}/
@@ -315,10 +315,10 @@ jobs:
 
     steps:
       - name: Checkout (for label check)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Download report artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: ${{ env.ARTIFACT_PREFIX }}-${{ needs.preflight.outputs.run_label }}
           path: /tmp/status-report
