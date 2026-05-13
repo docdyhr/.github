@@ -323,6 +323,7 @@ jobs:
           REPORT_FILE="${REPORT_DIR}/report.md"
           MAX_BUDGET="${{ needs.preflight.outputs.max_budget }}"
 
+          CLAUDE_EXIT=0
           claude \
             --print \
             --bare \
@@ -332,11 +333,10 @@ jobs:
             --max-budget-usd "${MAX_BUDGET}" \
             --no-session-persistence \
             "$(cat "${RUNNER_TEMP}/orchestrator-prompt.txt")" \
-            > "$OUTPUT_FILE" 2>&1
+            > "$OUTPUT_FILE" 2>&1 || CLAUDE_EXIT=$?
 
-          CLAUDE_EXIT=$?
           if [[ $CLAUDE_EXIT -ne 0 ]]; then
-            echo "::error::claude exited with code ${CLAUDE_EXIT}. See artifact for details."
+            echo "::error::claude exited with code ${CLAUDE_EXIT}. Output:"
             cat "$OUTPUT_FILE" >&2
             exit $CLAUDE_EXIT
           fi
