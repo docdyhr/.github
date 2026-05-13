@@ -480,7 +480,7 @@ jobs:
           # Build checklist of critical repos
           REPO_CHECKLIST=$(echo "$CRITICAL_REPOS" | tr ',' '\n' | while read -r r; do
             [[ -z "$r" ]] && continue
-            printf '- [ ] [`%s`](https://github.com/%s)\n' "$r" "$r"
+            printf -- '- [ ] [`%s`](https://github.com/%s)\n' "$r" "$r"
           done)
 
           gh issue create \
