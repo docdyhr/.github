@@ -226,6 +226,7 @@ jobs:
 
           claude \
             --print \
+            --bare \
             --allowedTools \
               "Bash(gh pr list:*),Bash(gh pr checks:*),Bash(gh pr view:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh issue list:*),Bash(gh api:*),Bash(gh repo view:*),Bash(git log:*),Bash(git branch:*),Bash(git for-each-ref:*)" \
             --output-format json \

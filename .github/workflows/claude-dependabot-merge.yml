@@ -442,6 +442,7 @@ jobs:
 
           claude \
             --print \
+            --bare \
             --allowedTools "$ALLOWED" \
             --output-format json \
             --max-budget-usd "${{ needs.safety-gate.outputs.max_budget }}" \
