@@ -440,18 +440,19 @@ jobs:
             echo "::notice::Running in DRY-RUN mode — no PRs will be modified."
           fi
 
+          CLAUDE_EXIT=0
           claude \
             --print \
+            --bare \
             --allowedTools "$ALLOWED" \
             --output-format json \
             --max-budget-usd "${{ needs.safety-gate.outputs.max_budget }}" \
             --no-session-persistence \
             "$(cat "${PROMPT_FILE}")" \
-            > "$OUTPUT_FILE" 2>&1
+            > "$OUTPUT_FILE" 2>&1 || CLAUDE_EXIT=$?
 
-          CLAUDE_EXIT=$?
           if [[ $CLAUDE_EXIT -ne 0 ]]; then
-            echo "::error::claude exited with code ${CLAUDE_EXIT}. See artifact for full output."
+            echo "::error::claude exited with code ${CLAUDE_EXIT}. Output:"
             cat "$OUTPUT_FILE" >&2
             exit $CLAUDE_EXIT
           fi

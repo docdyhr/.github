@@ -224,19 +224,20 @@ jobs:
           OUTPUT_FILE="${REPORT_DIR}/raw-output.json"
           REPORT_FILE="${REPORT_DIR}/report.md"
 
+          CLAUDE_EXIT=0
           claude \
             --print \
+            --bare \
             --allowedTools \
               "Bash(gh pr list:*),Bash(gh pr checks:*),Bash(gh pr view:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh issue list:*),Bash(gh api:*),Bash(gh repo view:*),Bash(git log:*),Bash(git branch:*),Bash(git for-each-ref:*)" \
             --output-format json \
             --max-budget-usd "$MAX_BUDGET_USD" \
             --no-session-persistence \
             "$(cat "${PROMPT_FILE}")" \
-            > "$OUTPUT_FILE" 2>&1
+            > "$OUTPUT_FILE" 2>&1 || CLAUDE_EXIT=$?
 
-          CLAUDE_EXIT=$?
           if [[ $CLAUDE_EXIT -ne 0 ]]; then
-            echo "::error::claude exited with code ${CLAUDE_EXIT}"
+            echo "::error::claude exited with code ${CLAUDE_EXIT}. Output:"
             cat "$OUTPUT_FILE" >&2
             exit $CLAUDE_EXIT
           fi
