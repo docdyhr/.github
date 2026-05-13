@@ -1,0 +1,38 @@
+# Caller template for python-ci.yml reusable workflow.
+# Copy to .github/workflows/ci.yml in your repo and adjust the `with:` block.
+#
+# Full list of inputs and their defaults:
+#   https://github.com/docdyhr/.github/blob/main/.github/workflows/python-ci.yml
+
+name: CI/CD Pipeline
+
+permissions:
+  contents: write # required by the release job inside the reusable workflow
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  pipeline:
+    uses: docdyhr/.github/.github/workflows/python-ci.yml@v1
+    with:
+      python-version: "3.13"
+      # python-versions: '["3.11","3.12","3.13"]'   # default
+      # os-matrix: '["ubuntu-latest","macos-latest"]'  # default
+      apt-deps: "" # e.g. "shellcheck clang-format build-essential bc zip"
+      brew-deps: "" # e.g. "shellcheck clang-format bc"
+      # lint-command: "bash scripts/lint.sh check"   # default
+      # test-command: "bash scripts/run_tests.sh"    # default
+      # build-command: "make build"                  # default
+      # requirements-dev: "requirements-dev.txt"     # default
+      # enable-release: true                         # default
+    secrets: inherit
