@@ -149,7 +149,7 @@ jobs:
 
     steps:
       - name: Set up Node.js ${{ needs.preflight.outputs.node_version }}
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ needs.preflight.outputs.node_version }}
 
@@ -408,7 +408,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_PREFIX }}-${{ needs.preflight.outputs.run_label }}
           path: ${{ steps.prep.outputs.report_path }}/
@@ -529,7 +529,6 @@ jobs:
 
     steps:
       - name: Post Slack summary
-        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           HAS_CRITICAL: ${{ needs.orchestrate.outputs.has_critical }}
@@ -538,6 +537,11 @@ jobs:
           COST: ${{ needs.orchestrate.outputs.cost_usd }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          if [[ -z "$SLACK_WEBHOOK_URL" ]]; then
+            echo "SLACK_WEBHOOK_URL not set — skipping Slack notification."
+            exit 0
+          fi
+
           if [[ "$HAS_CRITICAL" == "true" ]]; then
             ICON="🔴"
             TITLE="${ICON} *Org Maintenance: CRITICAL issues found*"
@@ -579,7 +583,3 @@ jobs:
           else
             echo "Slack notification sent (HTTP 200)."
           fi
-
-      - name: Skip (SLACK_WEBHOOK_URL not configured)
-        if: ${{ secrets.SLACK_WEBHOOK_URL == '' }}
-        run: echo "SLACK_WEBHOOK_URL not set — skipping Slack notification."
