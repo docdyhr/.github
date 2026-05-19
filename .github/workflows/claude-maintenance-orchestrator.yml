@@ -149,7 +149,7 @@ jobs:
 
     steps:
       - name: Set up Node.js ${{ needs.preflight.outputs.node_version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ needs.preflight.outputs.node_version }}
 
@@ -409,7 +409,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ARTIFACT_PREFIX }}-${{ needs.preflight.outputs.run_label }}
           path: ${{ steps.prep.outputs.report_path }}/
