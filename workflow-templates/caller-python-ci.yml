@@ -34,5 +34,6 @@ jobs:
       # test-command: "bash scripts/run_tests.sh"    # default
       # build-command: "make build"                  # default
       # requirements-dev: "requirements-dev.txt"     # default
+      # package-manager: "pip"                       # or "uv" for uv-managed projects
       # enable-release: true                         # default
     secrets: inherit
