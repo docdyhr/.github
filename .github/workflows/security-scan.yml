@@ -1,0 +1,131 @@
+# .github/workflows/security-scan.yml
+#
+# Reusable Python security scan for the docdyhr org.
+#
+# Runs Bandit (SAST) and pip-audit (dependency vulnerability check).
+# pip-audit replaces safety — no API key required, PyPA-maintained.
+#
+# ─── Caller pattern ───────────────────────────────────────────────────────────
+#
+#   jobs:
+#     security:
+#       uses: docdyhr/.github/.github/workflows/security-scan.yml@v1
+#       with:
+#         bandit_skip: "B404,B603"          # optional
+#         bandit_exclude: "tests,.venv"      # optional
+#
+# ─── Inputs ───────────────────────────────────────────────────────────────────
+#   python_version      Python version to use (default: "3.12")
+#   scan_paths          Space-separated paths for Bandit (default: ".")
+#   requirements_file   Path to requirements file for pip-audit (default: "requirements.txt")
+#   bandit_skip         Comma-separated Bandit IDs to skip (default: "")
+#   bandit_exclude      Comma-separated paths to exclude from Bandit (default: ".venv,tests")
+#   install_project     pip install -e . before scanning (default: false)
+#   check_secrets       Run hardcoded-secrets grep (default: true)
+
+name: Python Security Scan (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      python_version:
+        description: "Python version for scanning"
+        type: string
+        default: "3.12"
+      scan_paths:
+        description: "Space-separated paths to scan with Bandit"
+        type: string
+        default: "."
+      requirements_file:
+        description: "Path to requirements file for pip-audit"
+        type: string
+        default: "requirements.txt"
+      bandit_skip:
+        description: "Comma-separated Bandit test IDs to skip (e.g. B404,B603)"
+        type: string
+        default: ""
+      bandit_exclude:
+        description: "Comma-separated paths to exclude from Bandit scan"
+        type: string
+        default: ".venv,tests,test_*.py"
+      install_project:
+        description: "Run pip install -e . before scanning"
+        type: boolean
+        default: false
+      check_secrets:
+        description: "Run hardcoded-secrets grep on .py and .json files"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python ${{ inputs.python_version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs.python_version }}
+          cache: "pip"
+
+      - name: Install security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit pip-audit
+
+      - name: Install project dependencies
+        if: inputs.install_project
+        run: pip install -e .
+
+      - name: Install requirements
+        env:
+          REQ_FILE: ${{ inputs.requirements_file }}
+        run: |
+          if [ -f "$REQ_FILE" ]; then
+            pip install -r "$REQ_FILE"
+          else
+            echo "No requirements file at $REQ_FILE — skipping"
+          fi
+
+      - name: Run Bandit (SAST)
+        env:
+          BANDIT_SKIP: ${{ inputs.bandit_skip }}
+          BANDIT_EXCLUDE: ${{ inputs.bandit_exclude }}
+          SCAN_PATHS: ${{ inputs.scan_paths }}
+        run: |
+          SKIP_ARG=""
+          [ -n "$BANDIT_SKIP" ] && SKIP_ARG="--skip $BANDIT_SKIP"
+          EXCLUDE_ARG=""
+          [ -n "$BANDIT_EXCLUDE" ] && EXCLUDE_ARG="-x $BANDIT_EXCLUDE"
+          # shellcheck disable=SC2086
+          bandit -r $SCAN_PATHS $SKIP_ARG $EXCLUDE_ARG
+
+      - name: Check for hardcoded secrets
+        if: inputs.check_secrets
+        run: |
+          echo "Checking for potential hardcoded secrets..."
+          if grep -rn --include="*.py" --include="*.json" \
+            -E "(api_key|apikey|secret|password|token|credential)[[:space:]]*[=:][[:space:]]*['\"][a-zA-Z0-9]{16,}['\"]" .; then
+            echo "Potential hardcoded secrets found above — review before merging"
+            exit 1
+          fi
+          echo "No obvious hardcoded secrets found"
+
+      - name: Run pip-audit (dependency vulnerabilities)
+        env:
+          REQ_FILE: ${{ inputs.requirements_file }}
+        run: |
+          if [ -f "$REQ_FILE" ]; then
+            pip-audit -r "$REQ_FILE"
+          else
+            pip-audit
+          fi
