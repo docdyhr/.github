@@ -1,0 +1,31 @@
+# Caller template for security.yml reusable workflow (Trivy filesystem scan).
+# Copy to .github/workflows/security.yml in your repo.
+#
+# For Python SAST + pip-audit, also add security-scan.yml (or use it instead).
+#
+# Full list of inputs and their defaults:
+#   https://github.com/docdyhr/.github/blob/main/.github/workflows/security.yml
+
+name: Security Scan
+
+permissions:
+  contents: read
+  security-events: write # required for SARIF upload to Code Scanning
+  actions: read # required on private repos
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: "0 6 * * 1" # weekly on Monday
+  workflow_dispatch:
+
+jobs:
+  trivy:
+    uses: docdyhr/.github/.github/workflows/security.yml@v1
+    with:
+      # trivy-severity: "CRITICAL,HIGH"      # default
+      # trivy-scanners: "vuln,secret"        # or add "misconfig"
+    secrets: inherit

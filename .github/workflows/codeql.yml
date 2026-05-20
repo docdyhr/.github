@@ -1,0 +1,79 @@
+# .github/workflows/codeql.yml
+#
+# REUSABLE WORKFLOW — GitHub CodeQL static analysis for docdyhr/* repos.
+#
+# Lives at: docdyhr/.github/.github/workflows/codeql.yml
+# Consumers reference this via:
+#
+#     uses: docdyhr/.github/.github/workflows/codeql.yml@v1
+#
+# Always pin to an immutable tag (@v1), not a branch.
+#
+# ─── What it does ────────────────────────────────────────────────────────────
+# One job per language in the matrix:
+#   analyze  — CodeQL init → autobuild (or custom build) → analyze → SARIF upload
+#
+# Results appear in repo Security → Code scanning alerts.
+#
+# ─── Required permissions (caller must set at workflow level) ─────────────────
+#   contents: read
+#   security-events: write   — required to upload SARIF to Code Scanning
+#   actions: read            — required on private repos
+#
+# ─── SECURITY ────────────────────────────────────────────────────────────────
+# inputs.build-command is interpolated into a shell run: step. Callers must be
+# within the docdyhr org or otherwise trusted. Never call this workflow from an
+# untrusted fork.
+#
+# ─── All inputs have defaults — callers override only what differs. ───────────
+
+name: CodeQL Analysis (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      languages:
+        description: 'JSON array of CodeQL languages (e.g. ''["python"]'')'
+        type: string
+        default: '["python"]'
+        required: false
+      queries:
+        description: "CodeQL query suite ('security-extended' or 'security-and-quality')"
+        type: string
+        default: "security-extended"
+        required: false
+      build-command:
+        description: "Build command for compiled languages; empty string uses autobuild"
+        type: string
+        default: ""
+        required: false
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJson(inputs.languages) }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: ${{ inputs.queries }}
+      - name: Autobuild
+        if: inputs.build-command == ''
+        uses: github/codeql-action/autobuild@v3
+      - name: Build
+        if: inputs.build-command != ''
+        run: ${{ inputs.build-command }}
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

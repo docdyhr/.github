@@ -1,0 +1,67 @@
+# .github/workflows/security.yml
+#
+# REUSABLE WORKFLOW — Trivy vulnerability scan for docdyhr/* repos.
+#
+# Lives at: docdyhr/.github/.github/workflows/security.yml
+# Consumers reference this via:
+#
+#     uses: docdyhr/.github/.github/workflows/security.yml@v1
+#
+# Always pin to an immutable tag (@v1), not a branch.
+#
+# ─── What it does ────────────────────────────────────────────────────────────
+# One job:
+#   trivy — filesystem vulnerability scan (deps + secrets + IaC misconfig);
+#            uploads SARIF → GitHub Code Scanning (Security tab)
+#
+# For Python SAST (bandit) and dep auditing (pip-audit) use security-scan.yml.
+#
+# ─── Required permissions (caller must set at workflow level) ─────────────────
+#   contents: read
+#   security-events: write   — required to upload SARIF to Code Scanning
+#   actions: read            — required on private repos
+#
+# ─── All inputs have defaults — callers override only what differs. ───────────
+
+name: Trivy Security Scan (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      trivy-severity:
+        description: "Comma-separated severity levels to include in the report"
+        type: string
+        default: "CRITICAL,HIGH"
+        required: false
+      trivy-scanners:
+        description: "Comma-separated scanners to enable (vuln,secret,misconfig)"
+        type: string
+        default: "vuln,secret"
+        required: false
+
+jobs:
+  trivy:
+    name: Trivy scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: ${{ inputs.trivy-severity }}
+          scanners: ${{ inputs.trivy-scanners }}
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: "0"
+      - name: Upload Trivy SARIF to Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy

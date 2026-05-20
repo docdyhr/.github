@@ -35,8 +35,12 @@ jobs:
 |---|---|---|
 | `claude-dependabot-merge.yml` | Headless Claude evaluation + merge of Dependabot PRs | `v1` |
 | `claude-status-check.yml` | Weekly repo health check — PRs, CI, issues, Dependabot, stale branches | `v1` |
+| `python-ci.yml` | Five-stage Python pipeline: lint → package → test matrix → gate → release; supports `pip` and `uv` | `v1` |
+| `security-scan.yml` | Python security: Bandit SAST + pip-audit dependency audit + hardcoded-secrets grep | `v1` |
+| `security.yml` | Trivy filesystem scan (vulns + secrets); SARIF → Code Scanning | `v1` |
+| `codeql.yml` | GitHub CodeQL static analysis; SARIF → Code Scanning | `v1` |
 | `claude-maintenance-orchestrator.yml` | Cross-repo scheduled orchestrator — runs health checks and Dependabot triage across all T1+T2 repos from this repo on a schedule | — |
 
 `claude-maintenance-orchestrator.yml` is not a reusable workflow — it runs directly from this repo via `schedule` and `workflow_dispatch`. It requires the `GH_ORG_TOKEN` secret (fine-grained PAT with `contents:read` + `pull-requests:read` for all target repos).
 
-More to come: `python-ci.yml`, `node-ci.yml`, `rust-ci.yml`, `release-*.yml`, `homebrew-bump.yml`, `stale.yml`.
+More to come: `node-ci.yml`, `rust-ci.yml`, `release-*.yml`, `homebrew-bump.yml`, `stale.yml`.

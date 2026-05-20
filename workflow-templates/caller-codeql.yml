@@ -1,0 +1,30 @@
+# Caller template for codeql.yml reusable workflow.
+# Copy to .github/workflows/codeql.yml in your repo and adjust the `with:` block.
+#
+# Full list of inputs and their defaults:
+#   https://github.com/docdyhr/.github/blob/main/.github/workflows/codeql.yml
+
+name: CodeQL Analysis
+
+permissions:
+  contents: read
+  security-events: write # required for SARIF upload to Code Scanning
+  actions: read # required on private repos
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: "0 6 * * 1" # weekly on Monday
+  workflow_dispatch:
+
+jobs:
+  codeql:
+    uses: docdyhr/.github/.github/workflows/codeql.yml@v1
+    with:
+      languages: '["python"]'
+      # queries: "security-extended"   # default; or "security-and-quality"
+      # build-command: ""              # empty = autobuild (correct for Python)
+    secrets: inherit
