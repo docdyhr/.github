@@ -1,0 +1,78 @@
+name: Rust Code Quality
+
+on:
+  workflow_call:
+    inputs:
+      clippy-flags:
+        description: "Extra flags passed to cargo clippy (after --)"
+        required: false
+        type: string
+        default: "-W clippy::pedantic -W clippy::nursery -W clippy::cargo"
+      upload-coverage:
+        description: "Upload coverage report to Codecov"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  markdown-lint:
+    name: Markdown Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Run markdownlint
+        continue-on-error: true
+        uses: DavidAnson/markdownlint-cli2-action@ded1f9488f68a970bc66ea5619e13e9b52e601cd # v23.2.0
+        with:
+          globs: "**/*.md"
+
+  rust-quality:
+    name: Rust Quality Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Run clippy
+        env:
+          CLIPPY_FLAGS: ${{ inputs.clippy-flags }}
+        run: cargo clippy --all-targets --all-features -- $CLIPPY_FLAGS
+      - name: Check formatting
+        run: cargo fmt -- --check
+      - name: Check for TODO/FIXME comments
+        run: |
+          TODO_COUNT=$(grep -r "TODO\|FIXME\|XXX\|HACK" src/ --exclude-dir=target \
+            | grep -v "// Check for TODO" | grep -v '"TODO"' | grep -v "todo_count" \
+            | wc -l)
+          if [ "$TODO_COUNT" -gt 0 ]; then
+            echo "Found $TODO_COUNT TODO/FIXME comments:"
+            grep -r "TODO\|FIXME\|XXX\|HACK" src/ --exclude-dir=target \
+              | grep -v "// Check for TODO" | grep -v '"TODO"' | grep -v "todo_count"
+          fi
+
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install cargo-llvm-cov
+        run: cargo install --locked cargo-llvm-cov
+      - name: Generate coverage report
+        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+      - name: Upload coverage to Codecov
+        if: inputs.upload-coverage
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
