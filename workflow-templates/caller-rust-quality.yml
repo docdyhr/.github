@@ -1,0 +1,14 @@
+name: Code Quality
+
+on:
+  schedule:
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    uses: docdyhr/.github/.github/workflows/rust-quality.yml@v1
+    secrets: inherit # pragma: allowlist secret

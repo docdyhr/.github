@@ -1,0 +1,19 @@
+name: Security Review
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  security:
+    uses: docdyhr/.github/.github/workflows/rust-security.yml@v1
+    secrets: inherit # pragma: allowlist secret

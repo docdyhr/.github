@@ -1,0 +1,135 @@
+name: Rust Security Review
+
+on:
+  workflow_call:
+    inputs:
+      allow-licenses:
+        description: "Comma-separated list of allowed SPDX license identifiers"
+        required: false
+        type: string
+        default: "MIT, Apache-2.0, BSD-3-Clause, ISC, MPL-2.0"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Run cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit --color never --json --stale > audit-results.json 2>&1 || true
+          cargo audit --color never --stale || true
+      - name: Gate on high/critical vulnerabilities
+        run: |
+          HIGH_COUNT=$(jq '[.vulnerabilities.list[]? | select(.advisory.severity == "high" or .advisory.severity == "critical")] | length' audit-results.json 2>/dev/null || echo 0)
+          echo "High/Critical count: $HIGH_COUNT"
+          if [ "$HIGH_COUNT" -gt 0 ]; then
+            echo "❌ High or Critical vulnerabilities detected." >&2; exit 1
+          else
+            echo "✅ No high/critical vulnerabilities"
+          fi
+      - name: Run cargo deny
+        continue-on-error: true
+        uses: EmbarkStudios/cargo-deny-action@a531616d8ce3b9177443e48a1159bc945a099823 # v2
+      - name: Check for outdated dependencies
+        continue-on-error: true
+        run: |
+          cargo install cargo-outdated --locked
+          cargo outdated --exit-code 1 --root-deps-only || echo "⚠️ Outdated dependencies found"
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: security-audit-results
+          path: audit-results.json
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v4
+        with:
+          fail-on-severity: moderate
+          allow-licenses: ${{ inputs.allow-licenses }}
+
+  semgrep:
+    name: Semgrep Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Run Semgrep
+        continue-on-error: true
+        run: semgrep scan --config p/security-audit --config p/rust --config p/secrets --sarif --output semgrep.sarif . || true
+      - name: Upload SARIF
+        if: always() && hashFiles('semgrep.sarif') != ''
+        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4
+        with:
+          sarif_file: semgrep.sarif
+
+  supply-chain-security:
+    name: Supply Chain Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Generate SBOM
+        continue-on-error: true
+        run: |
+          cargo install cargo-cyclonedx --locked || echo "Failed to install cargo-cyclonedx"
+          cargo cyclonedx --format json > sbom.json || echo "SBOM generation failed"
+      - name: Upload SBOM
+        if: hashFiles('sbom.json') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: software-bill-of-materials
+          path: sbom.json
+
+  license-check:
+    name: License Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Check licenses
+        continue-on-error: true
+        run: |
+          cargo install cargo-license --locked || echo "Failed to install cargo-license"
+          if command -v cargo-license &> /dev/null; then
+            cargo license --json > licenses.json 2>&1 || true
+            PROBLEMATIC=$(cargo license 2>/dev/null | grep -E "^(GPL|AGPL|SSPL|BSL)" | grep -v "Unicode" || true)
+            if [ -n "$PROBLEMATIC" ]; then
+              echo "❌ Problematic license found:"; echo "$PROBLEMATIC"; exit 1
+            else
+              echo "✅ All licenses are compatible"
+            fi
+          fi
+      - name: Upload license report
+        if: hashFiles('licenses.json') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: license-report
+          path: licenses.json
