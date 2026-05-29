@@ -1,0 +1,132 @@
+# .github/workflows/rust-benchmark.yml
+#
+# REUSABLE WORKFLOW — Weekly Rust benchmarking for docdyhr/* repos.
+# Installs hyperfine, builds the release binary, runs a caller-supplied
+# benchmark script, uploads results, comments on PRs, and opens an issue
+# on scheduled failure.
+#
+# The calling repo must provide a benchmark script (default: scripts/benchmark.sh)
+# that runs hyperfine commands and writes results to benchmark_results.md.
+#
+# Usage:
+#   uses: docdyhr/.github/.github/workflows/rust-benchmark.yml@v1
+#   with:
+#     binary-name: my-binary
+
+name: Rust Benchmark (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      binary-name:
+        description: "Binary name to build before running benchmarks"
+        type: string
+        required: true
+      benchmark-script:
+        description: "Path to the benchmark script in the calling repo"
+        type: string
+        default: "scripts/benchmark.sh"
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
+        with:
+          toolchain: stable
+
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-benchmark-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install hyperfine
+        run: |
+          curl -Lo hyperfine.tar.gz \
+            https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine-v1.18.0-x86_64-unknown-linux-gnu.tar.gz
+          tar xzf hyperfine.tar.gz
+          sudo install hyperfine-v1.18.0-x86_64-unknown-linux-gnu/hyperfine /usr/local/bin/
+
+      - name: Build release binary
+        env:
+          BINARY: ${{ inputs.binary-name }}
+        run: cargo build --release
+
+      - name: Run benchmark script
+        env:
+          BENCHMARK_SCRIPT: ${{ inputs.benchmark-script }}
+          BINARY: ${{ inputs.binary-name }}
+        run: |
+          if [ ! -f "$BENCHMARK_SCRIPT" ]; then
+            echo "Benchmark script not found: $BENCHMARK_SCRIPT"
+            exit 1
+          fi
+          bash "$BENCHMARK_SCRIPT"
+
+      - name: Capture results
+        id: results
+        run: |
+          if [ -f benchmark_results.md ]; then
+            {
+              echo 'comment<<EOF'
+              cat benchmark_results.md
+              echo 'EOF'
+            } >> "$GITHUB_OUTPUT"
+            cat benchmark_results.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: benchmark-results
+          path: benchmark_results.md
+          retention-days: 90
+
+  comment-pr:
+    name: Comment on PR
+    if: github.event_name == 'pull_request' && needs.benchmark.outputs.comment != ''
+    needs: benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_COMMENT: ${{ needs.benchmark.outputs.comment }}
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: process.env.PR_COMMENT
+            })
+
+  create-issue:
+    name: Create Performance Issue
+    if: failure() && (github.event_name == 'schedule' || github.event_name == 'push')
+    needs: benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Performance Regression Detected',
+              body: 'Automated benchmarking detected a regression. Please investigate.',
+              labels: ['performance', 'bug']
+            })

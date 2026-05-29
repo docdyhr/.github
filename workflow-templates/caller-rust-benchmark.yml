@@ -1,0 +1,29 @@
+# Caller template for rust-benchmark.yml reusable workflow.
+# Copy to .github/workflows/performance.yml in your repo and set binary-name.
+#
+# Your repo must provide a benchmark script (default: scripts/benchmark.sh).
+# The script receives the built binary at ./target/release/<binary-name> and
+# should write results to benchmark_results.md.
+#
+# Full list of inputs and their defaults:
+#   https://github.com/docdyhr/.github/blob/main/.github/workflows/rust-benchmark.yml
+
+name: Performance
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"  # weekly Monday 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  benchmark:
+    uses: docdyhr/.github/.github/workflows/rust-benchmark.yml@v1
+    with:
+      binary-name: my-binary          # ← set your binary name here
+      benchmark-script: scripts/benchmark.sh
+    secrets: inherit # pragma: allowlist secret

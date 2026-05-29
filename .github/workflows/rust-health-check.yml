@@ -1,0 +1,163 @@
+# .github/workflows/rust-health-check.yml
+#
+# REUSABLE WORKFLOW — Weekly Rust repository health check for docdyhr/* repos.
+# Checks: large files, stale workflows, TODO density, duplicate dependencies,
+# unused imports. Creates/updates a GitHub issue when problems are found.
+#
+# Usage:
+#   uses: docdyhr/.github/.github/workflows/rust-health-check.yml@v1
+
+name: Rust Repository Health Check (reusable)
+
+on:
+  workflow_call: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  health-check:
+    name: Repository Health Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
+        with:
+          toolchain: stable
+
+      - name: Run health checks
+        id: checks
+        run: |
+          echo "# Repository Health Report" > health-report.md
+          echo "Generated on: $(date -u)" >> health-report.md
+          echo "" >> health-report.md
+          ISSUES_FOUND=0
+
+          # Large files
+          echo "## Large Files" >> health-report.md
+          LARGE=$(find . -type f -size +1M -not -path "./.git/*" -not -path "./target/*" | head -10)
+          if [ -n "$LARGE" ]; then
+            echo "⚠️ Files >1 MB found:" >> health-report.md
+            printf '```\n%s\n```\n' "$LARGE" >> health-report.md
+            ISSUES_FOUND=$((ISSUES_FOUND + 1))
+          else
+            echo "✅ No large files" >> health-report.md
+          fi
+          echo "" >> health-report.md
+
+          # Stale workflows (90 days by git log date)
+          echo "## Workflow Ages" >> health-report.md
+          NINETY_DAYS_AGO=$(date -u -d '90 days ago' '+%Y-%m-%d' 2>/dev/null || date -u -v-90d '+%Y-%m-%d')
+          OLD=""
+          for wf in .github/workflows/*.yml; do
+            LAST=$(git log -1 --format='%ai' -- "$wf" 2>/dev/null | cut -d' ' -f1)
+            if [ -n "$LAST" ] && [ "$LAST" \< "$NINETY_DAYS_AGO" ]; then
+              OLD="${OLD}${wf} (${LAST})\n"
+            fi
+          done
+          if [ -n "$OLD" ]; then
+            echo "⚠️ Workflows not updated in 90+ days:" >> health-report.md
+            printf '```\n%b```\n' "$OLD" >> health-report.md
+            ISSUES_FOUND=$((ISSUES_FOUND + 1))
+          else
+            echo "✅ All workflows recently updated" >> health-report.md
+          fi
+          echo "" >> health-report.md
+
+          # TODO/FIXME density
+          echo "## Code Quality" >> health-report.md
+          TODO_COUNT=$(grep -r "TODO\|FIXME\|XXX\|HACK" src/ 2>/dev/null | wc -l || echo "0")
+          if [ "$TODO_COUNT" -gt 5 ]; then
+            echo "⚠️ $TODO_COUNT TODO/FIXME comments found:" >> health-report.md
+            printf '```\n' >> health-report.md
+            grep -rn "TODO\|FIXME\|XXX\|HACK" src/ 2>/dev/null | head -10 >> health-report.md
+            printf '```\n' >> health-report.md
+            ISSUES_FOUND=$((ISSUES_FOUND + 1))
+          else
+            echo "✅ TODO/FIXME count is reasonable ($TODO_COUNT)" >> health-report.md
+          fi
+          echo "" >> health-report.md
+
+          # Duplicate dependency versions
+          echo "## Dependency Health" >> health-report.md
+          DUPS=$(cargo tree --duplicates 2>/dev/null || echo "")
+          if [ -n "$DUPS" ]; then
+            CRATE_VERSIONS=$(echo "$DUPS" | grep -E "^[a-zA-Z]" | sed 's/ (\*)$//' | sort -u)
+            CRATE_NAMES=$(echo "$CRATE_VERSIONS" | sed 's/ v[0-9].*//' | sort)
+            ACTUAL=$(echo "$CRATE_NAMES" | uniq -d)
+            HARMLESS='^(bitflags|getrandom)$'
+            CONCERNING=$(echo "$ACTUAL" | grep -vE "$HARMLESS" || true)
+            if [ -n "$CONCERNING" ]; then
+              echo "⚠️ Multiple versions of the same dependency:" >> health-report.md
+              printf '```\n%s\n```\n' "$CONCERNING" >> health-report.md
+              ISSUES_FOUND=$((ISSUES_FOUND + 1))
+            else
+              echo "✅ No conflicting dependency versions" >> health-report.md
+            fi
+          else
+            echo "✅ No duplicate dependencies" >> health-report.md
+          fi
+          echo "" >> health-report.md
+
+          # Unused imports
+          echo "## Unused Imports" >> health-report.md
+          UNUSED=$(cargo check 2>&1 | grep -c "unused import" || echo "0")
+          if [ "$UNUSED" -gt 0 ]; then
+            echo "⚠️ $UNUSED unused imports detected" >> health-report.md
+            ISSUES_FOUND=$((ISSUES_FOUND + 1))
+          else
+            echo "✅ No unused imports" >> health-report.md
+          fi
+          echo "" >> health-report.md
+
+          # Summary
+          echo "## Summary" >> health-report.md
+          if [ "$ISSUES_FOUND" -eq 0 ]; then
+            echo "🎉 Repository is healthy!" >> health-report.md
+          else
+            echo "⚠️ $ISSUES_FOUND issue(s) need attention." >> health-report.md
+          fi
+
+          echo "ISSUES_FOUND=$ISSUES_FOUND" >> "$GITHUB_ENV"
+          cat health-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload health report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: health-report
+          path: health-report.md
+
+      - name: Create or update issue
+        if: env.ISSUES_FOUND != '0' && github.event_name == 'schedule'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('health-report.md', 'utf8');
+            const issuesFound = process.env.ISSUES_FOUND;
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['health-check', 'automated'],
+              state: 'open'
+            });
+            if (existing.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Repository Health Check — ${issuesFound} issue(s) found`,
+                body: `## Automated Health Check\n\n${report}\n\n---\n*Auto-created by health-check workflow.*`,
+                labels: ['health-check', 'automated', 'maintenance']
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.data[0].number,
+                body: `## Updated Health Check\n\n${report}\n\n---\n*Updated: ${new Date().toISOString()}*`
+              });
+            }

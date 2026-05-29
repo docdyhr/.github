@@ -1,0 +1,30 @@
+# Caller template for rust-ci.yml reusable workflow.
+# Copy to .github/workflows/ci.yml in your repo and set binary-name.
+#
+# Full list of inputs and their defaults:
+#   https://github.com/docdyhr/.github/blob/main/.github/workflows/rust-ci.yml
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  ci:
+    uses: docdyhr/.github/.github/workflows/rust-ci.yml@v1
+    with:
+      binary-name: my-binary  # ← set your binary name here
+    secrets: inherit # pragma: allowlist secret
