@@ -1,0 +1,23 @@
+# Caller template for rust-test-comprehensive.yml reusable workflow.
+# Copy to .github/workflows/test-comprehensive.yml in your repo.
+# Intended for scheduled runs only — use rust-ci.yml for push/PR CI.
+#
+# Full list of inputs and their defaults:
+#   https://github.com/docdyhr/.github/blob/main/.github/workflows/rust-test-comprehensive.yml
+
+name: Comprehensive Testing
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"  # weekly Monday 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-comprehensive:
+    uses: docdyhr/.github/.github/workflows/rust-test-comprehensive.yml@v1
+    with:
+      msrv: "1.85.0"  # ← set your MSRV here
+    secrets: inherit # pragma: allowlist secret

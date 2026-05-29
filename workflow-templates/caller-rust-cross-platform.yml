@@ -1,0 +1,34 @@
+# Caller template for rust-cross-platform.yml reusable workflow.
+# Copy to .github/workflows/cross-platform.yml in your repo and set binary-name.
+#
+# Full list of inputs and their defaults:
+#   https://github.com/docdyhr/.github/blob/main/.github/workflows/rust-cross-platform.yml
+
+name: Cross-Platform Validation
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"  # weekly Monday 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      test-type:
+        description: "Scope of testing"
+        required: true
+        default: "full"
+        type: choice
+        options: [full, quick, targets-only]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cross-platform:
+    uses: docdyhr/.github/.github/workflows/rust-cross-platform.yml@v1
+    with:
+      binary-name: my-binary  # ← set your binary name here
+      test-type: ${{ inputs.test-type || 'full' }}
+    secrets: inherit # pragma: allowlist secret

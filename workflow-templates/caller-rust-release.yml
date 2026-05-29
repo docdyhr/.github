@@ -1,0 +1,32 @@
+# Caller template for rust-release.yml reusable workflow.
+# Copy to .github/workflows/release.yml in your repo and set binary-name.
+#
+# The reusable handles: validate → test → build (5 targets) → attest
+#   → GitHub release → crates.io publish (OIDC).
+#
+# Add extra jobs below (homebrew tap update, post-release monitoring, etc.)
+# as needed for your project.
+#
+# Full list of inputs and their defaults:
+#   https://github.com/docdyhr/.github/blob/main/.github/workflows/rust-release.yml
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.2.3)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    uses: docdyhr/.github/.github/workflows/rust-release.yml@v1
+    with:
+      binary-name: my-binary  # ← set your binary name here
+    secrets: inherit # pragma: allowlist secret

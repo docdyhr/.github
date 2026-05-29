@@ -1,0 +1,21 @@
+# Caller template for rust-health-check.yml reusable workflow.
+# Copy to .github/workflows/health-check.yml in your repo.
+#
+# Full list of inputs and their defaults:
+#   https://github.com/docdyhr/.github/blob/main/.github/workflows/rust-health-check.yml
+
+name: Repository Health Check
+
+on:
+  schedule:
+    - cron: "0 6 * * 3"  # weekly Wednesday 06:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  health-check:
+    uses: docdyhr/.github/.github/workflows/rust-health-check.yml@v1
+    secrets: inherit # pragma: allowlist secret
