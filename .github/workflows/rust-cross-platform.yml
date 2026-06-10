@@ -190,7 +190,14 @@ jobs:
           BINARY: ${{ inputs.binary-name }}
         run: |
           $output = & "./target/release/$env:BINARY.exe" nonexistent.txt 2>&1 | Out-String
-          Write-Host "Error handling test passed"
+          if ($output -imatch "error") {
+            Write-Host "Error handling test passed"
+            exit 0
+          } else {
+            Write-Host "Error handling test FAILED - expected 'error' in output"
+            Write-Host "Actual output: $output"
+            exit 1
+          }
 
   integration-validation:
     name: Integration Validation
