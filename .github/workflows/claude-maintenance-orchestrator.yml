@@ -48,7 +48,7 @@ on:
       node_version:
         description: "Node.js version for Claude Code CLI"
         type: string
-        default: "20"
+        default: "24"
 
 # Only one orchestrator run at a time — never interleave cross-repo writes.
 concurrency:
@@ -89,12 +89,12 @@ jobs:
             esac
             CREATE_ISSUE="true"
             MAX_BUDGET="2.00"
-            NODE_VERSION="20"
+            NODE_VERSION="24"
           else
             EFFECTIVE_TASKS="${{ inputs.tasks || 'all' }}"
             CREATE_ISSUE="${{ inputs.create_summary_issue || 'true' }}"
             MAX_BUDGET="${{ inputs.max_budget_usd || '2.00' }}"
-            NODE_VERSION="${{ inputs.node_version || '20' }}"
+            NODE_VERSION="${{ inputs.node_version || '24' }}"
           fi
 
           HAS_ORG_TOKEN="false"
