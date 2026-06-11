@@ -74,7 +74,7 @@ on:
     secrets:
       ANTHROPIC_API_KEY:
         description: "Claude API key"
-        required: true
+        required: false
       SLACK_WEBHOOK_URL:
         description: "Optional Slack webhook for completion notifications"
         required: false
@@ -106,6 +106,7 @@ jobs:
       max_budget: ${{ steps.resolve.outputs.max_budget }}
       run_label: ${{ steps.resolve.outputs.run_label }}
       slack_enabled: ${{ steps.resolve.outputs.slack_enabled }}
+      api_key_present: ${{ steps.key-check.outputs.api_key_present }}
 
     steps:
       - name: Resolve effective merge mode
@@ -152,13 +153,21 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify ANTHROPIC_API_KEY secret
+        id: key-check
         run: |
           if [[ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]]; then
-            echo "::error::ANTHROPIC_API_KEY secret is not set."
-            echo "Add it at: Settings → Secrets and variables → Actions → New repository secret"
-            exit 1
+            if [[ "${{ github.event_name }}" == "push" ]]; then
+              echo "::warning::ANTHROPIC_API_KEY not set — Claude evaluation skipped (push trigger is dry-run only)."
+              echo "api_key_present=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "::error::ANTHROPIC_API_KEY secret is not set."
+              echo "Add it at: Settings → Secrets and variables → Actions → New repository secret"
+              exit 1
+            fi
+          else
+            echo "✅ ANTHROPIC_API_KEY is present."
+            echo "api_key_present=true" >> "$GITHUB_OUTPUT"
           fi
-          echo "✅ ANTHROPIC_API_KEY is present."
 
       - name: Verify gh token can read the repo
         env:
@@ -277,7 +286,7 @@ jobs:
     name: Evaluate and merge (${{ needs.safety-gate.outputs.merge_mode }})
     needs: [safety-gate, discover]
     runs-on: ubuntu-latest
-    if: needs.discover.outputs.has_prs == 'true'
+    if: needs.discover.outputs.has_prs == 'true' && needs.safety-gate.outputs.api_key_present == 'true'
     outputs:
       merged_count: ${{ steps.parse.outputs.merged_count }}
       skipped_count: ${{ steps.parse.outputs.skipped_count }}
