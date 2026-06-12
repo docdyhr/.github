@@ -231,11 +231,19 @@ jobs:
             DEPENDABOT_INSTRUCTIONS=$(cat << 'TASK_EOF'
           ### Task B — Dependabot PR Triage
 
+          NOTE: Patch version bumps (X.Y.Z → X.Y.W, same major and minor) are
+          auto-merged natively via dependabot-auto-merge.yml in each repo — no
+          action needed here. Focus only on minor and major version bumps.
+
           For each repository, fetch open non-draft Dependabot PRs:
             gh pr list --repo <REPO> --state open --author "app/dependabot" \
               --json number,title,headRefName,isDraft,labels,createdAt
 
-          For each open non-draft Dependabot PR, check CI status:
+          Skip any PR whose title matches a pure patch bump
+          (e.g. "Bump foo from 1.2.3 to 1.2.4" where only the last number changes).
+          Report skipped patch PRs as "PATCH — auto-merge" without CI checks.
+
+          For each remaining non-patch Dependabot PR, check CI status:
             gh pr checks <NUMBER> --repo <REPO> --json name,conclusion,required
 
           Classify each PR:
@@ -243,6 +251,7 @@ jobs:
             PENDING_CI     — at least one check still in_progress or queued
             FAILING_CI     — at least one required check has conclusion failure/error
             NEEDS_REVIEW   — branch protection requires a human review approval
+            PATCH_AUTO     — patch bump, auto-merge enabled natively (skip CI check)
           TASK_EOF
           )
           else

@@ -14,6 +14,10 @@
 # and branch protection, and (in live mode) merges the eligible ones using
 # headless Claude Code. Dry-run mode reports decisions without modifying PRs.
 #
+# NOTE: PATCH bumps are now auto-merged natively via dependabot-auto-merge.yml
+# in each consumer repo (no Claude, no API cost). This workflow defaults to
+# scope=minor so it only evaluates minor and major version bumps.
+#
 # Safety gates (ALL must pass before any merge):
 #   1. PR author must be app/dependabot (not forks or other bots)
 #   2. PR must not be a draft
@@ -52,9 +56,9 @@ on:
         default: dry-run
         required: false
       scope:
-        description: "all | security | patch — filter applied to open Dependabot PRs"
+        description: "minor (default) | all | security | patch — filter applied to open Dependabot PRs. 'minor' excludes patch bumps (auto-merged natively)."
         type: string
-        default: all
+        default: minor
         required: false
       max_budget_usd:
         description: "Maximum Claude API spend in USD for this run"
@@ -210,6 +214,21 @@ jobs:
           fi
 
           case "$SCOPE" in
+            minor)
+              # Exclude pure patch bumps (X.Y.Z → X.Y.W) — those are auto-merged natively.
+              # Includes: non-semver bumps (e.g. github-actions v3→v4), minor bumps, major bumps.
+              ALL_PRS=$(echo "$ALL_PRS" | jq '
+                [.[] | select(
+                  (.title | test("from [0-9]+\\.[0-9]+\\.[0-9]+ to [0-9]+\\.[0-9]+\\.[0-9]+"; "i") | not)
+                  or
+                  (
+                    (.title | capture("from (?P<fm>[0-9]+)\\.(?P<fmn>[0-9]+)\\.[0-9]+ to (?P<tm>[0-9]+)\\.(?P<tmn>[0-9]+)\\.[0-9]+"; "i")) as $v |
+                    ($v.fm != $v.tm or $v.fmn != $v.tmn)
+                  )
+                )]
+              ')
+              echo "After minor/major filter: $(echo "$ALL_PRS" | jq 'length') PRs (patch bumps excluded)"
+              ;;
             security)
               ALL_PRS=$(echo "$ALL_PRS" | jq '
                 [.[] | select(.labels | map(.name) | any(. == "security"))]
