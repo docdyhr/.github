@@ -42,7 +42,7 @@ on:
         required: false
     secrets:
       ANTHROPIC_API_KEY:
-        required: true
+        required: false
       SLACK_WEBHOOK_URL:
         required: false
 
@@ -90,11 +90,16 @@ jobs:
       - name: Verify ANTHROPIC_API_KEY is set
         run: |
           if [[ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]]; then
-            echo "::error::ANTHROPIC_API_KEY secret is not set."
-            echo "Add it at: Settings → Secrets and variables → Actions → New repository secret"
-            exit 1
+            if [[ "${{ github.event_name }}" == "push" ]]; then
+              echo "::warning::ANTHROPIC_API_KEY not set — health-check will be skipped (push trigger)."
+            else
+              echo "::error::ANTHROPIC_API_KEY secret is not set."
+              echo "Add it at: Settings → Secrets and variables → Actions → New repository secret"
+              exit 1
+            fi
+          else
+            echo "✅ ANTHROPIC_API_KEY present"
           fi
-          echo "✅ ANTHROPIC_API_KEY present"
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
