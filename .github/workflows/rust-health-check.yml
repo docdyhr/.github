@@ -1,8 +1,9 @@
 # .github/workflows/rust-health-check.yml
 #
 # REUSABLE WORKFLOW — Weekly Rust repository health check for docdyhr/* repos.
-# Checks: large files, stale workflows, TODO density, duplicate dependencies,
-# unused imports. Creates/updates a GitHub issue when problems are found.
+# Checks: large files, TODO density, duplicate dependencies, unused imports.
+# Also reports workflow ages (informational only, never counted as a problem).
+# Creates/updates a GitHub issue when problems are found.
 #
 # Usage:
 #   uses: docdyhr/.github/.github/workflows/rust-health-check.yml@v1
@@ -49,7 +50,8 @@ jobs:
           fi
           echo "" >> health-report.md
 
-          # Stale workflows (90 days by git log date)
+          # Workflow ages (90 days by git log date). Informational only: an
+          # unedited workflow isn't unhealthy; Dependabot keeps pins current.
           echo "## Workflow Ages" >> health-report.md
           NINETY_DAYS_AGO=$(date -u -d '90 days ago' '+%Y-%m-%d' 2>/dev/null || date -u -v-90d '+%Y-%m-%d')
           OLD=""
@@ -60,9 +62,8 @@ jobs:
             fi
           done
           if [ -n "$OLD" ]; then
-            echo "⚠️ Workflows not updated in 90+ days:" >> health-report.md
+            echo "ℹ️ Workflows not updated in 90+ days:" >> health-report.md
             printf '```\n%b```\n' "$OLD" >> health-report.md
-            ISSUES_FOUND=$((ISSUES_FOUND + 1))
           else
             echo "✅ All workflows recently updated" >> health-report.md
           fi
