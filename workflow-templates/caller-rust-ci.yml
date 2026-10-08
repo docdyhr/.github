@@ -26,5 +26,6 @@ jobs:
   ci:
     uses: docdyhr/.github/.github/workflows/rust-ci.yml@v1
     with:
-      binary-name: my-binary  # ← set your binary name here
+      binary-name: my-binary # ← set your binary name here
+      # msrv: "1.88.0" # ← optional: check Cargo.toml rust-version on every PR
     secrets: inherit # pragma: allowlist secret
