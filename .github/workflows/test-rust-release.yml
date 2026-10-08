@@ -2,7 +2,7 @@ name: Test rust-release
 
 # Runs the regression tests for rust-release.yml's "Extract changelog section"
 # step on the same runner image the release uses (ubuntu-latest, where awk is
-# mawk). The tests read the step's script straight from rust-release.yml.
+# GNU awk). The tests read the step's script straight from rust-release.yml.
 
 on:
   pull_request:

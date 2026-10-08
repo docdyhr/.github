@@ -13,7 +13,7 @@ if [[ -z "$step" || "$step" == "null" ]]; then
   exit 1
 fi
 
-# GitHub's ubuntu runners use mawk; macOS uses BWK awk. Show which one ran.
+# The release runs on ubuntu-latest (GNU awk); macOS has BWK awk. Show which one ran.
 echo "awk: $({ awk --version 2>/dev/null || awk -W version 2>/dev/null; } </dev/null | head -1)"
 
 failures=0
