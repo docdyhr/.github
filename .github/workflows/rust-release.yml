@@ -182,11 +182,24 @@ jobs:
         env:
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
+          # Print the "## [X.Y.Z]" (or "## X.Y.Z") section up to the next
+          # version heading. Match VERSION as a string, not a regex, so its dots
+          # stay literal and 0.7.1 doesn't match a "## [0.7.10]" heading.
+          # Tested by .github/tests/changelog-extract/run.sh.
           if [[ -f "CHANGELOG.md" ]]; then
-            awk "/^## \[?${VERSION}\]?/,/^## \[?[0-9]/ {
-              if (/^## \[?[0-9]/ && !/^## \[?${VERSION}\]?/) exit
-              print
-            }" CHANGELOG.md > current_changelog.md
+            awk -v ver="$VERSION" '
+              /^## / {
+                h = substr($0, 4)
+                sub(/^\[/, "", h)
+                if (found) {
+                  if (h ~ /^[0-9]/) exit
+                } else if (index(h, ver) == 1) {
+                  c = substr(h, length(ver) + 1, 1)
+                  if (c == "" || c == "]" || c == " " || c == "\t") found = 1
+                }
+              }
+              found { print }
+            ' CHANGELOG.md > current_changelog.md
           fi
           if [[ ! -s current_changelog.md ]]; then
             printf 'Release v%s\n\nSee commit history for changes.\n' "$VERSION" > current_changelog.md
