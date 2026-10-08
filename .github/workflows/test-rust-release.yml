@@ -1,0 +1,33 @@
+name: Test rust-release
+
+# Runs the regression tests for rust-release.yml's "Extract changelog section"
+# step on the same runner image the release uses (ubuntu-latest, where awk is
+# GNU awk). The tests read the step's script straight from rust-release.yml.
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/rust-release.yml
+      - .github/workflows/test-rust-release.yml
+      - .github/tests/changelog-extract/**
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/rust-release.yml
+      - .github/workflows/test-rust-release.yml
+      - .github/tests/changelog-extract/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  changelog-extract:
+    name: Changelog extraction
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run extraction tests
+        run: .github/tests/changelog-extract/run.sh
