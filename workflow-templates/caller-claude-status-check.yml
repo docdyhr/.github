@@ -48,7 +48,7 @@ jobs:
     # scope makes the run fail to start (or, before v1 needed it, a 403 in the report).
     permissions:
       contents: read
-      issues: write                # read for the report, write for the CRITICAL issue
+      issues: write                # report reads; CRITICAL issue writes
       pull-requests: read
       actions: read                # CI runs
       checks: read                 # PR CI rollup
