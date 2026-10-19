@@ -43,4 +43,23 @@ jobs:
 
 `claude-maintenance-orchestrator.yml` is not a reusable workflow — it runs directly from this repo via `schedule` and `workflow_dispatch`. It requires the `GH_ORG_TOKEN` secret: a fine-grained PAT for all target repos with read-only Contents, Pull requests, Issues, Actions, Commit statuses and Dependabot alerts. Pre-flight fails fast if `ANTHROPIC_API_KEY` or a set `GH_ORG_TOKEN` is rejected, and a status run fails if no repo returned data.
 
+### `claude-status-check.yml`: caller permissions and token
+
+A called workflow can only keep or reduce the caller's `GITHUB_TOKEN` scopes, never raise them. So every caller must grant all of these, or its runs fail to start:
+
+```yaml
+    permissions:
+      contents: read
+      issues: write                # read for the report, write for the CRITICAL issue
+      pull-requests: read
+      actions: read                # CI runs
+      checks: read                 # PR CI rollup
+      statuses: read               # PR CI rollup
+      vulnerability-alerts: read   # Dependabot alerts
+```
+
+Secret-scanning alerts can't be read with `GITHUB_TOKEN` at all. To include them, give the caller repo an optional `STATUS_CHECK_ALERTS_TOKEN` secret: a fine-grained PAT with read-only "Secret scanning alerts" and "Metadata" on that repo. The workflow uses it in a pre-fetch step only, never hands it to Claude, and puts only a summary (no secret values) into the prompt. Without it, the report says "NOT CHECKED". A 403 from any other endpoint now shows as "NOT CHECKED — token lacks permission" instead of N/A, so a permission gap can't pass for a disabled feature.
+
+When adding a scope here, update every caller **before** re-tagging `v1` (see `MAINTENANCE.md`). `workflow-templates/caller-claude-status-check.yml` carries the current list.
+
 More to come: `node-ci.yml`, `rust-ci.yml`, `release-*.yml`, `homebrew-bump.yml`, `stale.yml`.

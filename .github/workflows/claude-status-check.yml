@@ -14,6 +14,21 @@
 #
 # Optional secrets:
 #   SLACK_WEBHOOK_URL   — Incoming webhook for Slack notifications
+#   STATUS_CHECK_ALERTS_TOKEN — fine-grained PAT, read-only "Secret scanning alerts"
+#                         and "Metadata" on the caller repo. The workflow token can never
+#                         read secret-scanning alerts. Used only in a pre-fetch step, never
+#                         handed to Claude. Without it the report says "NOT CHECKED".
+#
+# Required caller permissions. A called workflow can only reduce the caller's grant,
+# never raise it, so a scope missing here makes the run fail to start:
+#   permissions:
+#     contents: read
+#     pull-requests: read
+#     issues: write                # read for the report, write for the CRITICAL issue
+#     actions: read                # gh run list
+#     checks: read                 # PR CI rollup (check runs)
+#     statuses: read               # PR CI rollup (commit statuses)
+#     vulnerability-alerts: read   # Dependabot alerts
 
 name: Claude Status Check
 
@@ -44,6 +59,8 @@ on:
       ANTHROPIC_API_KEY:
         required: false
       SLACK_WEBHOOK_URL:
+        required: false
+      STATUS_CHECK_ALERTS_TOKEN:
         required: false
 
 env:
@@ -88,9 +105,11 @@ jobs:
           echo "| Budget | \$${MAX_BUDGET_USD} |" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify ANTHROPIC_API_KEY is set
+        # Read the secret from env, never via ${{ }}: interpolation pastes it into the
+        # generated script file instead of the process environment.
         run: |
-          if [[ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]]; then
-            if [[ "${{ github.event_name }}" == "push" ]]; then
+          if [[ -z "${ANTHROPIC_API_KEY}" ]]; then
+            if [[ "${EVENT_NAME}" == "push" ]]; then
               echo "::warning::ANTHROPIC_API_KEY not set — health-check will be skipped (push trigger)."
             else
               echo "::error::ANTHROPIC_API_KEY secret is not set."
@@ -102,6 +121,7 @@ jobs:
           fi
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EVENT_NAME: ${{ github.event_name }}
 
   # ── Health check ──────────────────────────────────────────────────────────────
   health-check:
@@ -109,9 +129,16 @@ jobs:
     needs: preflight
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
+    # Read-only scopes for every gh call in the prompt. The caller must grant each of
+    # them too (see the header): a called workflow cannot raise the caller's grant.
     permissions:
       contents: read
       pull-requests: read
+      issues: read
+      actions: read
+      checks: read
+      statuses: read
+      vulnerability-alerts: read
     outputs:
       overall_health: ${{ steps.parse.outputs.overall_health }}
       has_critical: ${{ steps.parse.outputs.has_critical }}
@@ -153,7 +180,11 @@ jobs:
           Default branch: ${DEFAULT_BRANCH}
 
           Work through all sections below. Use only the allowed tools (gh CLI and git).
-          If a feature is not enabled (API returns 404 or 403), write "N/A" for that section.
+          If an API returns 404, the feature is not enabled: write "N/A — not enabled".
+          If an API returns 403 ("Resource not accessible by integration"), write
+          "NOT CHECKED — token lacks permission for <endpoint>". Never write plain "N/A" for a
+          403: it means this workflow's permissions are wrong, not that the feature is off.
+          Show NOT CHECKED as ⚪ in the summary table, never as ✅.
           Output a single self-contained Markdown document — no questions, no interactive steps.
 
           ## Section 1 — Open Pull Requests
@@ -174,10 +205,11 @@ jobs:
           - Total count, bug-labelled (🐛), unassigned > 30 days (👻).
 
           ## Section 4 — Dependabot & Security Alerts
-          gh api /repos/${REPO}/dependabot/alerts --jq '[.[] | select(.state=="open")]'
+          gh api "/repos/${REPO}/dependabot/alerts?state=open&per_page=100" --paginate
           - Group by severity: 🔴 critical | 🟠 high | 🟡 medium | 🔵 low.
-          gh api /repos/${REPO}/secret-scanning/alerts?state=open
-          - Any result is P0 🚨 — list secret type.
+          Secret scanning: do NOT call the secret-scanning API (this job's token cannot read it).
+          Use the "Pre-fetched data — Secret scanning" block at the end of this prompt.
+          - Any open alert is P0 🚨 — list its secret type. "NOT CHECKED" is not "0 exposed".
 
           ## Section 5 — Stale Branches
           gh api /repos/${REPO}/branches --paginate --jq '.[].name'
@@ -218,6 +250,35 @@ jobs:
 
           echo "Prompt written ($(wc -c < "${RUNNER_TEMP}/status-prompt.txt") bytes)"
 
+      - name: Fetch secret-scanning alerts (optional token)
+        # The workflow token can never read secret-scanning alerts. When the caller
+        # provides STATUS_CHECK_ALERTS_TOKEN, it is used here only. Claude never sees it,
+        # and only a summary without secret values is appended to the prompt.
+        env:
+          ALERTS_TOKEN: ${{ secrets.STATUS_CHECK_ALERTS_TOKEN }}
+          REPO: ${{ needs.preflight.outputs.repo }}
+        run: |
+          PROMPT_FILE="${RUNNER_TEMP}/status-prompt.txt"
+          ERR_FILE="${RUNNER_TEMP}/secret-scanning-error.txt"
+          if [[ -z "${ALERTS_TOKEN}" ]]; then
+            RESULT="NOT CHECKED — STATUS_CHECK_ALERTS_TOKEN is not configured (the workflow token cannot read secret-scanning alerts)."
+          elif ALERTS=$(GH_TOKEN="${ALERTS_TOKEN}" gh api --paginate \
+                "/repos/${REPO}/secret-scanning/alerts?state=open&per_page=100" \
+                --jq '.[] | {number, secret_type_display_name, created_at, html_url}' 2>"$ERR_FILE"); then
+            COUNT=$(printf '%s\n' "$ALERTS" | grep -c '"number"' || true)
+            RESULT="OK — ${COUNT} open alert(s)."
+            [[ "$COUNT" -gt 0 ]] && RESULT="${RESULT}"$'\n'"${ALERTS}"
+          elif grep -q 'HTTP 404' "$ERR_FILE"; then
+            RESULT="N/A — secret scanning is not enabled for this repository (HTTP 404)."
+          else
+            RESULT="NOT CHECKED — the API rejected STATUS_CHECK_ALERTS_TOKEN: $(tail -n 1 "$ERR_FILE")"
+          fi
+          {
+            printf '\n## Pre-fetched data — Secret scanning (use this; do not call the API)\n'
+            printf '%s\n' "$RESULT"
+          } >> "$PROMPT_FILE"
+          echo "Secret scanning: $(printf '%s\n' "$RESULT" | head -n 1)"
+
       - name: Run Claude headless status check
         id: claude
         env:
@@ -248,7 +309,7 @@ jobs:
           fi
 
           RESULT_TEXT=$(jq -r '.result // "ERROR: no result field in output"' "$OUTPUT_FILE")
-          COST=$(jq -r '.cost_usd // "unknown"' "$OUTPUT_FILE")
+          COST=$(jq -r '.total_cost_usd // .cost_usd // "unknown"' "$OUTPUT_FILE")
 
           echo "API cost: \$${COST}"
           echo "cost_usd=${COST}" >> "$GITHUB_OUTPUT"

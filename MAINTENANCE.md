@@ -39,6 +39,14 @@ git push -f origin v1
 
 All consumers pick up the change automatically on next run — no PR required.
 
+**Exception: a change that needs a new `GITHUB_TOKEN` scope.** A called workflow can't raise the caller's permissions. Re-tagging `v1` before every caller grants the new scope makes those callers' runs fail to start. Land the scope in each caller's `permissions:` block first (extra caller scopes are harmless under the old `v1`). Then check each caller's default branch:
+
+```bash
+for r in <callers>; do gh api "repos/docdyhr/$r/contents/.github/workflows/claude-status-check.yml" --jq .content | base64 -d | grep -c '<new-scope>: read'; done
+```
+
+Re-tag only when every count is 1. The current caller list and required scopes for `claude-status-check.yml` are in `.github/workflows/README.md`.
+
 ## The docdyhr standard (Tier 1–2 repos)
 
 - `main` as default branch
