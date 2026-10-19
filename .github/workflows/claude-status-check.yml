@@ -290,9 +290,13 @@ jobs:
         run: |
           PROMPT_FILE="${RUNNER_TEMP}/status-prompt.txt"
           OUTPUT_FILE="${REPORT_DIR}/raw-output.json"
+          STDERR_FILE="${REPORT_DIR}/claude-stderr.txt"
           REPORT_FILE="${REPORT_DIR}/report.md"
 
           CLAUDE_EXIT=0
+          # stdout and stderr go to separate files: stdout must be exactly one JSON
+          # document, and anything Claude Code writes to stderr (warnings, notices)
+          # would otherwise land in front of it and break the jq parse below.
           claude \
             --print \
             --bare \
@@ -302,12 +306,23 @@ jobs:
             --max-budget-usd "$MAX_BUDGET_USD" \
             --no-session-persistence \
             "$(cat "${PROMPT_FILE}")" \
-            > "$OUTPUT_FILE" 2>&1 || CLAUDE_EXIT=$?
+            > "$OUTPUT_FILE" 2> "$STDERR_FILE" || CLAUDE_EXIT=$?
 
           if [[ $CLAUDE_EXIT -ne 0 ]]; then
-            echo "::error::claude exited with code ${CLAUDE_EXIT}. Output:"
-            cat "$OUTPUT_FILE" >&2
+            echo "::error::claude exited with code ${CLAUDE_EXIT}."
+            echo "--- stdout (first 2000 bytes):" >&2; head -c 2000 "$OUTPUT_FILE" >&2
+            echo "--- stderr (first 2000 bytes):" >&2; head -c 2000 "$STDERR_FILE" >&2
             exit $CLAUDE_EXIT
+          fi
+          if [[ -s "$STDERR_FILE" ]]; then
+            echo "::warning::claude wrote to stderr (first 1000 bytes follow)."
+            head -c 1000 "$STDERR_FILE"; echo
+          fi
+          if ! jq -e 'type == "object"' "$OUTPUT_FILE" > /dev/null 2>&1; then
+            echo "::error::claude stdout is not a JSON object."
+            echo "--- stdout (first 2000 bytes):" >&2; head -c 2000 "$OUTPUT_FILE" >&2
+            echo "--- stderr (first 2000 bytes):" >&2; head -c 2000 "$STDERR_FILE" >&2
+            exit 1
           fi
 
           RESULT_TEXT=$(jq -r '.result // "ERROR: no result field in output"' "$OUTPUT_FILE")
