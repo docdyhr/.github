@@ -181,7 +181,7 @@ jobs:
 
     steps:
       - name: Set up Node.js ${{ needs.preflight.outputs.node_version }}
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ needs.preflight.outputs.node_version }}
 
