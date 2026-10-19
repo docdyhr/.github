@@ -103,21 +103,21 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ inputs.python-version }}
       - name: Install uv
         if: inputs.package-manager == 'uv'
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         if: inputs.package-manager == 'pip'
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: .venv
           key: ${{ runner.os }}-${{ inputs.package-manager }}-venv-${{ hashFiles('**/requirements*.txt') }}
@@ -147,21 +147,21 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ inputs.python-version }}
       - name: Install uv
         if: inputs.package-manager == 'uv'
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         if: inputs.package-manager == 'pip'
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: .venv
           key: ${{ runner.os }}-${{ inputs.package-manager }}-venv-${{ hashFiles('**/requirements*.txt') }}
@@ -201,21 +201,21 @@ jobs:
         os: ${{ fromJson(inputs.os-matrix) }}
         python-version: ${{ fromJson(inputs.python-versions) }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install uv
         if: inputs.package-manager == 'uv'
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         if: inputs.package-manager == 'pip'
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-py${{ matrix.python-version }}-pip-${{ hashFiles('**/requirements*.txt') }}
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: .venv
           key: ${{ runner.os }}-py${{ matrix.python-version }}-${{ inputs.package-manager }}-venv-${{ hashFiles('**/requirements*.txt') }}
@@ -254,7 +254,7 @@ jobs:
           if-no-files-found: ignore
       - name: Upload to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == inputs.python-version
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6.0.2
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         continue-on-error: true
         with:
           files: ./coverage.xml
@@ -284,15 +284,15 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ inputs.python-version }}
       - name: Install uv
         if: inputs.package-manager == 'uv'
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
       - name: Install system dependencies
