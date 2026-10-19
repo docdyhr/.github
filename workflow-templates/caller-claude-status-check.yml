@@ -44,10 +44,18 @@ concurrency:
 jobs:
   call-reusable:
     uses: docdyhr/.github/.github/workflows/claude-status-check.yml@v1
+    # The reusable workflow can only use scopes granted here, never more. A missing
+    # scope makes the run fail to start (or, before v1 needed it, a 403 in the report).
     permissions:
       contents: read
-      issues: write
+      issues: write                # report reads; CRITICAL issue writes
       pull-requests: read
+      actions: read                # CI runs
+      checks: read                 # PR CI rollup
+      statuses: read               # PR CI rollup
+      vulnerability-alerts: read   # Dependabot alerts
+    # Optional STATUS_CHECK_ALERTS_TOKEN (fine-grained PAT, read-only "Secret scanning
+    # alerts" + "Metadata") enables the secret-scanning section.
     secrets: inherit
     with:
       create_issue: ${{ github.event.inputs.create_issue == 'true' }}
