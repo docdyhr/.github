@@ -184,7 +184,9 @@ jobs:
           If an API returns 403 ("Resource not accessible by integration"), write
           "NOT CHECKED — token lacks permission for <endpoint>". Never write plain "N/A" for a
           403: it means this workflow's permissions are wrong, not that the feature is off.
-          Show NOT CHECKED as ⚪ in the summary table, never as ✅.
+          Show NOT CHECKED as ⚪ in the summary table, never as ✅. A NOT CHECKED area is a
+          configuration gap, not a finding: it does not lower the overall health, and it goes
+          under Priority Actions as P4 🔵 ("configure <token/permission>"), never as P0–P3.
           Output a single self-contained Markdown document — no questions, no interactive steps.
 
           ## Section 1 — Open Pull Requests
