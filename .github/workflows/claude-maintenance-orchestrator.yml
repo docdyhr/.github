@@ -12,9 +12,12 @@
 #
 # ─── Secrets (set in docdyhr/.github repo settings) ──────────────────────────
 #   ANTHROPIC_API_KEY  — Claude API key (required)
-#   GH_ORG_TOKEN       — Fine-grained PAT with contents:read + pull-requests:read
-#                        for all T1+T2 repos. Without this, cross-repo gh calls
-#                        will 404 and each repo section will show "N/A".
+#   GH_ORG_TOKEN       — Fine-grained PAT for all T1+T2 repos, read-only:
+#                        Contents, Pull requests, Issues, Actions, Commit
+#                        statuses, Dependabot alerts (Metadata is implied).
+#                        Without it, cross-repo gh calls fail and each repo row
+#                        shows "N/A". Pre-flight fails if it is set but rejected,
+#                        and the run fails if no repo returned data.
 #   SLACK_WEBHOOK_URL  — Incoming webhook (optional)
 #
 # ─── Manual trigger ──────────────────────────────────────────────────────────
@@ -76,6 +79,7 @@ jobs:
         id: resolve
         env:
           SCHEDULE: ${{ github.event.schedule }}
+          GH_ORG_TOKEN: ${{ secrets.GH_ORG_TOKEN }}
         run: |
           TRIGGER="${{ github.event_name }}"
           RUN_LABEL="$(date -u '+%Y-%m-%d')"
@@ -98,7 +102,7 @@ jobs:
           fi
 
           HAS_ORG_TOKEN="false"
-          [[ -n "${{ secrets.GH_ORG_TOKEN }}" ]] && HAS_ORG_TOKEN="true"
+          [[ -n "$GH_ORG_TOKEN" ]] && HAS_ORG_TOKEN="true"
 
           {
             echo "effective_tasks=${EFFECTIVE_TASKS}"
@@ -125,13 +129,41 @@ jobs:
             echo "::warning::GH_ORG_TOKEN is not set. Cross-repo gh calls will use GITHUB_TOKEN, which only has access to this (.github) repo. Set GH_ORG_TOKEN for full cross-repo coverage."
           fi
 
-      - name: Verify ANTHROPIC_API_KEY
+      # Free, read-only probes, so a rejected credential fails here in seconds
+      # instead of after the paid Claude session (2026-10-18/19: a revoked
+      # ANTHROPIC_API_KEY, then an expired GH_ORG_TOKEN that left every row N/A).
+      # Secrets arrive through env and reach curl on stdin, never a command line.
+      - name: Verify credentials
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_ORG_TOKEN: ${{ secrets.GH_ORG_TOKEN }}
         run: |
-          if [[ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]]; then
+          if [[ -z "$ANTHROPIC_API_KEY" ]]; then
             echo "::error::ANTHROPIC_API_KEY secret is not set. Add it at: Settings → Secrets and variables → Actions."
             exit 1
           fi
-          echo "✅ ANTHROPIC_API_KEY present"
+          CODE=$(printf 'x-api-key: %s\nanthropic-version: 2023-06-01\n' "$ANTHROPIC_API_KEY" |
+            curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H @- \
+              https://api.anthropic.com/v1/models) || CODE="000"
+          case "$CODE" in
+            200) echo "✅ ANTHROPIC_API_KEY accepted" ;;
+            401 | 403)
+              echo "::error::ANTHROPIC_API_KEY was rejected (HTTP ${CODE}). Replace it at: Settings → Secrets and variables → Actions."
+              exit 1 ;;
+            *)
+              echo "::error::Could not verify ANTHROPIC_API_KEY (HTTP ${CODE}): the Anthropic API did not answer."
+              exit 1 ;;
+          esac
+
+          # Unset is only a warning (see Resolve); set but rejected is fatal.
+          if [[ -n "$GH_ORG_TOKEN" ]]; then
+            if LOGIN=$(GH_TOKEN="$GH_ORG_TOKEN" gh api user --jq .login 2>/dev/null); then
+              echo "✅ GH_ORG_TOKEN accepted (${LOGIN})"
+            else
+              echo "::error::GH_ORG_TOKEN was rejected by the GitHub API (expired or revoked?). Replace it at: Settings → Secrets and variables → Actions."
+              exit 1
+            fi
+          fi
 
   # ── Orchestrate all repos in one Claude session ───────────────────────────────
   orchestrate:
@@ -188,6 +220,7 @@ jobs:
           sed -i 's/^[[:space:]]*//' "${RUNNER_TEMP}/repos.txt"
           REPO_COUNT=$(wc -l < "${RUNNER_TEMP}/repos.txt" | tr -d ' ')
           REPO_LIST=$(sed 's/^/  - /' "${RUNNER_TEMP}/repos.txt")
+          echo "repo_count=${REPO_COUNT}" >> "$GITHUB_OUTPUT"
 
           # ── Task-specific instruction blocks ─────────────────────────────────
           if [[ "$TASKS" == "all" || "$TASKS" == *"status"* ]]; then
@@ -270,7 +303,7 @@ jobs:
           ${REPO_LIST}
 
           Work through every repository in the list. Use only the gh CLI and jq.
-          If a repo returns 404 or 403 for any call, write "N/A" for that field and continue.
+          If any call fails (401, 403, 404 or another error), write "N/A" for that field and continue.
           Do NOT skip any repo — process all of them, one at a time, in order.
 
           ${STATUS_INSTRUCTIONS}
@@ -351,7 +384,8 @@ jobs:
           fi
 
           RESULT_TEXT=$(jq -r '.result // "ERROR: no result field in claude output"' "$OUTPUT_FILE")
-          COST=$(jq -r '.cost_usd // "unknown"' "$OUTPUT_FILE")
+          # The CLI reports total_cost_usd; cost_usd is the old field name.
+          COST=$(jq -r '.total_cost_usd // .cost_usd // "unknown"' "$OUTPUT_FILE")
 
           echo "API cost: \$${COST}"
           echo "cost_usd=${COST}" >> "$GITHUB_OUTPUT"
@@ -424,6 +458,46 @@ jobs:
           path: ${{ steps.prep.outputs.report_path }}/
           retention-days: 90
           if-no-files-found: error
+
+      # A green run that checked nothing is what this guards against
+      # (2026-10-19: every gh call returned 401, every row was N/A, every job
+      # passed). It runs after the upload so the report stays available.
+      - name: Verify repo coverage
+        env:
+          TASKS: ${{ needs.preflight.outputs.effective_tasks }}
+          REPO_COUNT: ${{ steps.prompt.outputs.repo_count }}
+        run: |
+          if [[ "$TASKS" != "all" && "$TASKS" != *"status"* ]]; then
+            echo "Coverage check skipped: only the status task fills the health table (tasks=${TASKS})."
+            exit 0
+          fi
+
+          # Health table rows, and how many have data in at least one of
+          # Open PRs / CI / Open Issues / Dependabot Alerts (fields 4-7).
+          read -r ROWS COVERED < <(awk -F'|' '
+            /^## Repository Health Overview/ {t=1; next}
+            t && /^## / {t=0}
+            t && $2 ~ /docdyhr\// {
+              rows++; data=0
+              for (i = 4; i <= 7; i++) { f=$i; gsub(/^[ \t]+|[ \t]+$/, "", f); if (f !~ /^N\/A/) data=1 }
+              covered += data
+            }
+            END {print rows+0, covered+0}' "${REPORT_DIR}/report.md")
+
+          echo "Repo coverage: ${COVERED} of ${ROWS} rows have data (${REPO_COUNT} repos requested)"
+          echo "**Repo coverage:** ${COVERED}/${REPO_COUNT} repos returned data" >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$ROWS" -eq 0 ]]; then
+            echo "::error::The report has no Repository Health Overview rows, so coverage is unverified. See the report artifact."
+            exit 1
+          fi
+          if [[ "$COVERED" -eq 0 ]]; then
+            echo "::error::None of the ${ROWS} repos returned data (every field N/A). Check GH_ORG_TOKEN and the report artifact."
+            exit 1
+          fi
+          if [[ "$COVERED" -lt "$REPO_COUNT" ]]; then
+            echo "::warning::Only ${COVERED} of ${REPO_COUNT} repos returned data. See the report artifact."
+          fi
 
   # ── Create summary issue when CRITICAL repos are found ───────────────────────
   create-summary-issue:
