@@ -33,8 +33,8 @@ jobs:
 
 | Name | Purpose | Tag |
 |---|---|---|
-| `claude-dependabot-merge.yml` | Headless Claude evaluation + merge of Dependabot PRs. No callers since 2026-10-21 | `v1` |
-| `claude-status-check.yml` | Repo health check — PRs, CI, issues, Dependabot, stale branches. No callers since 2026-10-21 | `v1` |
+| `claude-dependabot-merge.yml` | Headless Claude evaluation + merge of Dependabot PRs. Only pigame (T4) still calls it | `v1` |
+| `claude-status-check.yml` | Repo health check — PRs, CI, issues, Dependabot, stale branches. Only pigame (T4) still calls it | `v1` |
 | `python-ci.yml` | Five-stage Python pipeline: lint → package → test matrix → gate → release; supports `pip` and `uv` | `v1` |
 | `security-scan.yml` | Python security: Bandit SAST + pip-audit dependency audit + hardcoded-secrets grep | `v1` |
 | `security.yml` | Trivy filesystem scan (vulns + secrets); SARIF → Code Scanning | `v1` |
@@ -43,7 +43,7 @@ jobs:
 
 `claude-maintenance-orchestrator.yml` is not a reusable workflow — it runs directly from this repo via `schedule` and `workflow_dispatch`. It requires the `GH_ORG_TOKEN` secret: a fine-grained PAT for all target repos with read-only Contents, Pull requests, Issues, Actions, Commit statuses and Dependabot alerts. Pre-flight fails fast if `ANTHROPIC_API_KEY` or a set `GH_ORG_TOKEN` is rejected, and a status run fails if no repo returned data.
 
-The orchestrator does the status and Dependabot work itself, so no repo calls `claude-dependabot-merge.yml` or `claude-status-check.yml` any more. The per-repo callers and their `workflow-templates/` files were retired on 2026-10-21; why is in `MAINTENANCE.md`.
+The orchestrator does the status and Dependabot work itself, so no T1/T2 repo calls `claude-dependabot-merge.yml` or `claude-status-check.yml` any more; only pigame (T4) still does. The per-repo callers and their `workflow-templates/` files were retired on 2026-10-21; why is in `MAINTENANCE.md`.
 
 ### `claude-status-check.yml`: caller permissions and token
 

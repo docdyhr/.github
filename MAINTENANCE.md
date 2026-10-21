@@ -16,18 +16,20 @@ Consumer repos carry only a thin caller (≤ 60 lines). To deploy an improvement
 
 | Workflow | Purpose | Tag |
 |---|---|---|
-| `claude-dependabot-merge.yml` | Headless Claude Dependabot auto-merge. No callers since 2026-10-21 (see below) | v1 |
-| `claude-status-check.yml` | Repo health check (PRs, CI, issues, alerts, branches). No callers since 2026-10-21 (see below) | v1 |
+| `claude-dependabot-merge.yml` | Headless Claude Dependabot auto-merge. Only pigame (T4) still calls it (see below) | v1 |
+| `claude-status-check.yml` | Repo health check (PRs, CI, issues, alerts, branches). Only pigame (T4) still calls it (see below) | v1 |
 
 Caller templates for new consumers: `workflow-templates/`
 
 ### Retired: per-repo Claude callers (2026-10-21)
 
-httpcheck, malwarespotter and simplenote-mcp-server used to carry thin callers for the two Claude workflows above. The callers and their templates were removed because nothing ran them:
+httpcheck, malwarespotter and simplenote-mcp-server carried thin callers for both Claude workflows above, and versiontracker had a dispatch-only caller of the merger saved as `dependabot-auto-merge.yml`. The callers and their templates were removed because nothing ran them:
 
-- **No schedule.** Each caller said "Schedule is owned by the cross-repo orchestrator", but the orchestrator never dispatches them. It does the status and Dependabot work itself in one session. The callers only ran on a push to their own file or by hand, so Claude Dependabot Auto-Merge had last run 130 days earlier.
-- **The work is covered elsewhere.** The orchestrator checks all T1+T2 repos every week. Patch bumps merge natively through each repo's `dependabot-auto-merge.yml`. The merge caller defaulted to `dry-run`, so a dispatched run merged nothing unless someone chose `live`.
+- **No schedule.** The callers said "Schedule is owned by the cross-repo orchestrator", but the orchestrator never dispatches them. It does the status and Dependabot work itself in one session. The callers only ran on a push to their own file or by hand, so httpcheck's Claude Dependabot Auto-Merge had last run 130 days earlier.
+- **The work is covered elsewhere.** The orchestrator checks all T1+T2 repos every week. Patch bumps merge natively: `dependabot-auto-merge.yml` in httpcheck, malwarespotter and versiontracker, `auto-merge.yml` in simplenote-mcp-server. The merge caller defaulted to `dry-run`, so a dispatched run merged nothing unless someone chose `live`.
 - **Dispatching them would widen the token.** `GH_ORG_TOKEN` is read-only by design. Starting workflows in other repos needs Actions: write on every one of them.
+
+versiontracker's `dependabot-auto-merge.yml` is now the native workflow httpcheck and malwarespotter use, plus a `ruff` exclusion. pigame (T4, outside the standard and the orchestrator's repo list) still has both callers, left alone under the T4 rule; its next `/status` will flag their driver claim again.
 
 The reusable workflows stay at `v1` for one-off use. To bring a caller back, write it from the reusable workflow's header, and give it a real trigger: a `schedule:` of its own, or a dispatch from the orchestrator.
 
