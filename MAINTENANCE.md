@@ -16,8 +16,8 @@ Consumer repos carry only a thin caller (≤ 60 lines). To deploy an improvement
 
 | Workflow | Purpose | Tag |
 |---|---|---|
-| `claude-dependabot-merge.yml` | Headless Claude Dependabot auto-merge. Only pigame (T4) still calls it (see below) | v1 |
-| `claude-status-check.yml` | Repo health check (PRs, CI, issues, alerts, branches). Only pigame (T4) still calls it (see below) | v1 |
+| `claude-dependabot-merge.yml` | Headless Claude Dependabot auto-merge. Callers on 2026-10-26: pigame and mac-diagnostics (see below); for the current list, run the inventory under Re-tagging | v1 |
+| `claude-status-check.yml` | Repo health check (PRs, CI, issues, alerts, branches). Callers on 2026-10-26: pigame and mac-diagnostics (see below); for the current list, run the inventory under Re-tagging | v1 |
 
 Caller templates for new consumers: `workflow-templates/`
 
@@ -30,6 +30,8 @@ httpcheck, malwarespotter and simplenote-mcp-server carried thin callers for bot
 - **Dispatching them would widen the token.** `GH_ORG_TOKEN` is read-only by design. Starting workflows in other repos needs Actions: write on every one of them.
 
 versiontracker's `dependabot-auto-merge.yml` is now the native workflow httpcheck and malwarespotter use, plus a `ruff` exclusion. pigame (T4, outside the standard and the orchestrator's repo list) still has both callers, left alone under the T4 rule; its next `/status` will flag their driver claim again.
+
+mac-diagnostics (private, in neither the tier table nor the orchestrator's repo list) also keeps both callers (decided 2026-10-26). The 10-21 count went by file name and missed it. None of the three reasons above applies to it: each caller has its own weekly `schedule:` (status Monday 07:00 UTC, merger Sunday 06:00 UTC), both run green, and the orchestrator does not cover the repo. The status run does real work (its Claude job ran for 41 s on 2026-10-26). The merger stops at "Nothing to do" when there is no Dependabot PR, so it costs no Claude run.
 
 The reusable workflows stay at `v1` for one-off use. To bring a caller back, write it from the reusable workflow's header, and give it a real trigger: a `schedule:` of its own, or a dispatch from the orchestrator.
 
@@ -51,13 +53,24 @@ git push -f origin v1
 
 All consumers pick up the change automatically on next run — no PR required.
 
+To see who the consumers are, run the inventory (owner's local tooling) instead of keeping a list here. A hand-written list was wrong twice: on 2026-10-21 ("all 3 consumers") and again on 2026-10-23, when mac-diagnostics was missing:
+
+```bash
+bash ~/.claude/skills/_shared/workflow-consumers.sh docdyhr <reusable-file>.yml   # CONSUMER <repo> <caller-path> → …@<ref>, then READ <n> repos, <m> files
+```
+
+It finds callers by their `uses:` target, so a caller saved under another file name still counts. Exit 0 means at least one consumer, 1 means none (everything was read), and 2 means some repo or file could not be read, so the list may be short. Never read exit 2 as "no consumers".
+
 **Exception: a change that needs a new `GITHUB_TOKEN` scope.** A called workflow can't raise the caller's permissions. Re-tagging `v1` before every caller grants the new scope makes those callers' runs fail to start. Land the scope in each caller's `permissions:` block first (extra caller scopes are harmless under the old `v1`). Then check each caller's default branch:
 
 ```bash
-for r in <callers>; do gh api "repos/docdyhr/$r/contents/.github/workflows/<caller-file>.yml" --jq .content | base64 -d | grep -c '<new-scope>: read'; done
+bash ~/.claude/skills/_shared/workflow-consumers.sh docdyhr <reusable-file>.yml > /tmp/callers.txt; echo "inventory exit $?"   # must be 0
+awk '$1 == "CONSUMER" {print $2, $3}' /tmp/callers.txt | while read -r r f; do
+  printf '%s %s: ' "$r" "$f"; gh api "repos/$r/contents/$f" --jq .content </dev/null | base64 -d | grep -c '<new-scope>: read'
+done
 ```
 
-Re-tag only when every count is 1. The scopes `claude-status-check.yml` needs are listed in `.github/workflows/README.md`.
+Re-tag only when the inventory exited 0 and every count is 1. The scopes `claude-status-check.yml` needs are listed in `.github/workflows/README.md`.
 
 ## The docdyhr standard (Tier 1–2 repos)
 
