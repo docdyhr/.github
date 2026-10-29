@@ -42,7 +42,7 @@ check() {
 }
 
 # ── Verify credentials ───────────────────────────────────────────────────────
-# Stubs: curl records argv and stdin, prints STUB_CURL_CODE, exits STUB_CURL_EXIT;
+# Stubs: curl records argv and stdin (it must never run: no credential probe sends the token);
 # gh records that it ran and exits STUB_GH_EXIT.
 stubs="$work/bin"
 mkdir -p "$stubs"
@@ -68,47 +68,42 @@ creds_case() {
   rm -f "$work"/curl.* "$work"/gh.*
   set +e
   out="$(env -i PATH="$stubs:$PATH" HOME="$work" STUB_DIR="$work" \
-    ANTHROPIC_API_KEY="" GH_ORG_TOKEN="" "$@" \
+    CLAUDE_CODE_OAUTH_TOKEN="" GH_ORG_TOKEN="" "$@" \
     bash --noprofile --norc -e -c "$creds_step" 2>&1)"
   rc=$?
   set -e
   check "$name" "$want_exit" "$want" "$rc" "$out"
 }
 
-key="sk-ant-test-0123456789"
-creds_case "missing ANTHROPIC_API_KEY fails" 1 "ANTHROPIC_API_KEY secret is not set"
-creds_case "accepted key, no org token passes" 0 "ANTHROPIC_API_KEY accepted" \
-  ANTHROPIC_API_KEY="$key" STUB_CURL_CODE=200
+token="sk-ant-oat01-test-0123456789"
+creds_case "missing CLAUDE_CODE_OAUTH_TOKEN fails" 1 "CLAUDE_CODE_OAUTH_TOKEN secret is not set"
+creds_case "subscription token, no org token passes" 0 "CLAUDE_CODE_OAUTH_TOKEN present" \
+  CLAUDE_CODE_OAUTH_TOKEN="$token"
 if [[ -e "$work/gh.argv" ]]; then
   echo "FAIL - unset GH_ORG_TOKEN is not probed (gh ran)"; failures=$((failures + 1))
 else
   echo "ok   - unset GH_ORG_TOKEN is not probed"
 fi
-
-# The key reaches curl on stdin, never on its command line.
-if grep -qF -- "$key" "$work/curl.argv"; then
-  echo "FAIL - key is not on curl's command line"; failures=$((failures + 1))
+# The subscription token has no free probe: it never reaches curl, and is never printed.
+if [[ -e "$work/curl.argv" ]]; then
+  echo "FAIL - the token is not sent to curl (curl ran)"; failures=$((failures + 1))
 else
-  echo "ok   - key is not on curl's command line"
+  echo "ok   - the token is not sent to curl"
 fi
-if grep -qF -- "x-api-key: $key" "$work/curl.stdin"; then
-  echo "ok   - key reaches curl on stdin"
+out="$(env -i PATH="$stubs:$PATH" HOME="$work" STUB_DIR="$work" CLAUDE_CODE_OAUTH_TOKEN="$token" GH_ORG_TOKEN="" \
+  bash --noprofile --norc -e -c "$creds_step" 2>&1)" || true
+if [[ "$out" == *"$token"* ]]; then
+  echo "FAIL - the token is never printed"; failures=$((failures + 1))
 else
-  echo "FAIL - key reaches curl on stdin"; failures=$((failures + 1))
+  echo "ok   - the token is never printed"
 fi
 
-creds_case "rejected key (401) fails" 1 "was rejected (HTTP 401)" \
-  ANTHROPIC_API_KEY="$key" STUB_CURL_CODE=401
-creds_case "rejected key (403) fails" 1 "was rejected (HTTP 403)" \
-  ANTHROPIC_API_KEY="$key" STUB_CURL_CODE=403
-creds_case "no answer (curl error) fails as unverified" 1 "Could not verify ANTHROPIC_API_KEY (HTTP 000)" \
-  ANTHROPIC_API_KEY="$key" STUB_CURL_CODE=000 STUB_CURL_EXIT=7
-creds_case "server error (503) fails as unverified" 1 "Could not verify ANTHROPIC_API_KEY (HTTP 503)" \
-  ANTHROPIC_API_KEY="$key" STUB_CURL_CODE=503
-creds_case "accepted key, accepted org token passes" 0 "GH_ORG_TOKEN accepted (octocat)" \
-  ANTHROPIC_API_KEY="$key" STUB_CURL_CODE=200 GH_ORG_TOKEN="github_pat_test" STUB_GH_EXIT=0
-creds_case "accepted key, rejected org token fails" 1 "GH_ORG_TOKEN was rejected" \
-  ANTHROPIC_API_KEY="$key" STUB_CURL_CODE=200 GH_ORG_TOKEN="github_pat_test" STUB_GH_EXIT=1
+creds_case "an API key in the token secret fails (subscription only)" 1 "does not look like a token from" \
+  CLAUDE_CODE_OAUTH_TOKEN="sk-ant-api03-test-0123456789"
+creds_case "subscription token, accepted org token passes" 0 "GH_ORG_TOKEN accepted (octocat)" \
+  CLAUDE_CODE_OAUTH_TOKEN="$token" GH_ORG_TOKEN="github_pat_test" STUB_GH_EXIT=0
+creds_case "subscription token, rejected org token fails" 1 "GH_ORG_TOKEN was rejected" \
+  CLAUDE_CODE_OAUTH_TOKEN="$token" GH_ORG_TOKEN="github_pat_test" STUB_GH_EXIT=1
 
 # ── Verify repo coverage ─────────────────────────────────────────────────────
 # report ROW... : a report whose health table holds the given rows
