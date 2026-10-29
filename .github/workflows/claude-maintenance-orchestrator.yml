@@ -11,7 +11,8 @@
 #   Monday  07:00  →  status task    (health check all repos, create issue if CRITICAL)
 #
 # ─── Secrets (set in docdyhr/.github repo settings) ──────────────────────────
-#   ANTHROPIC_API_KEY  — Claude API key (required)
+#   CLAUDE_CODE_OAUTH_TOKEN — Claude subscription token from `claude setup-token`
+#                        (required). The run uses the Max/Pro plan, never an API key.
 #   GH_ORG_TOKEN       — Fine-grained PAT for all T1+T2 repos, read-only:
 #                        Contents, Pull requests, Issues, Actions, Commit
 #                        statuses, Dependabot alerts (Metadata is implied).
@@ -129,29 +130,26 @@ jobs:
             echo "::warning::GH_ORG_TOKEN is not set. Cross-repo gh calls will use GITHUB_TOKEN, which only has access to this (.github) repo. Set GH_ORG_TOKEN for full cross-repo coverage."
           fi
 
-      # Free, read-only probes, so a rejected credential fails here in seconds
-      # instead of after the paid Claude session (2026-10-18/19: a revoked
-      # ANTHROPIC_API_KEY, then an expired GH_ORG_TOKEN that left every row N/A).
-      # Secrets arrive through env and reach curl on stdin, never a command line.
+      # Cheap checks, so a missing credential fails here in seconds instead of
+      # after the Claude session (2026-10-18/19: a revoked Claude credential,
+      # then an expired GH_ORG_TOKEN that left every row N/A). Claude runs on the
+      # subscription (CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`), never an
+      # API key. A subscription token has no free validity probe, so only its
+      # presence and shape are checked here; a rejected token fails the Claude step.
+      # Secrets arrive through env, never a command line.
       - name: Verify credentials
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GH_ORG_TOKEN: ${{ secrets.GH_ORG_TOKEN }}
         run: |
-          if [[ -z "$ANTHROPIC_API_KEY" ]]; then
-            echo "::error::ANTHROPIC_API_KEY secret is not set. Add it at: Settings → Secrets and variables → Actions."
+          if [[ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN secret is not set. Create it with \`claude setup-token\` (Claude subscription) and add it at: Settings → Secrets and variables → Actions."
             exit 1
           fi
-          CODE=$(printf 'x-api-key: %s\nanthropic-version: 2023-06-01\n' "$ANTHROPIC_API_KEY" |
-            curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H @- \
-              https://api.anthropic.com/v1/models) || CODE="000"
-          case "$CODE" in
-            200) echo "✅ ANTHROPIC_API_KEY accepted" ;;
-            401 | 403)
-              echo "::error::ANTHROPIC_API_KEY was rejected (HTTP ${CODE}). Replace it at: Settings → Secrets and variables → Actions."
-              exit 1 ;;
+          case "$CLAUDE_CODE_OAUTH_TOKEN" in
+            sk-ant-oat*) echo "✅ CLAUDE_CODE_OAUTH_TOKEN present (Claude subscription token)" ;;
             *)
-              echo "::error::Could not verify ANTHROPIC_API_KEY (HTTP ${CODE}): the Anthropic API did not answer."
+              echo "::error::CLAUDE_CODE_OAUTH_TOKEN does not look like a token from \`claude setup-token\` (expected the sk-ant-oat prefix). Replace it at: Settings → Secrets and variables → Actions."
               exit 1 ;;
           esac
 
@@ -357,7 +355,7 @@ jobs:
       - name: Run Claude headless orchestration
         id: claude
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Use org-level token when available; falls back to GITHUB_TOKEN (this repo only).
           GH_TOKEN: ${{ secrets.GH_ORG_TOKEN != '' && secrets.GH_ORG_TOKEN || github.token }}
         run: |
@@ -368,7 +366,8 @@ jobs:
           CLAUDE_EXIT=0
           claude \
             --print \
-            --bare \
+            --setting-sources user \
+            --strict-mcp-config \
             --allowedTools \
               "Bash(gh:*),Bash(jq:*),Bash(echo:*),Bash(cat:*),Bash(wc:*)" \
             --output-format json \

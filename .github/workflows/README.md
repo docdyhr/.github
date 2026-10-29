@@ -41,7 +41,7 @@ jobs:
 | `codeql.yml` | GitHub CodeQL static analysis; SARIF → Code Scanning | `v1` |
 | `claude-maintenance-orchestrator.yml` | Cross-repo scheduled orchestrator — runs health checks and Dependabot triage across all T1+T2 repos from this repo on a schedule | — |
 
-`claude-maintenance-orchestrator.yml` is not a reusable workflow — it runs directly from this repo via `schedule` and `workflow_dispatch`. It requires the `GH_ORG_TOKEN` secret: a fine-grained PAT for all target repos with read-only Contents, Pull requests, Issues, Actions, Commit statuses and Dependabot alerts. Pre-flight fails fast if `ANTHROPIC_API_KEY` or a set `GH_ORG_TOKEN` is rejected, and a status run fails if no repo returned data.
+`claude-maintenance-orchestrator.yml` is not a reusable workflow — it runs directly from this repo via `schedule` and `workflow_dispatch`. It requires the `GH_ORG_TOKEN` secret: a fine-grained PAT for all target repos with read-only Contents, Pull requests, Issues, Actions, Commit statuses and Dependabot alerts. Claude runs on the Claude subscription through the `CLAUDE_CODE_OAUTH_TOKEN` secret (create it with `claude setup-token`), never an API key. Pre-flight fails fast if `CLAUDE_CODE_OAUTH_TOKEN` is missing or malformed or a set `GH_ORG_TOKEN` is rejected, and a status run fails if no repo returned data.
 
 The orchestrator does the status and Dependabot work itself, so no T1/T2 repo calls `claude-dependabot-merge.yml` or `claude-status-check.yml` any more; only pigame (T4) still does. The per-repo callers and their `workflow-templates/` files were retired on 2026-10-21; why is in `MAINTENANCE.md`.
 

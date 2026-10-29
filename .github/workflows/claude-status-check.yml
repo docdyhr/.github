@@ -10,7 +10,8 @@
 #   - Optional Slack notification via webhook
 #
 # Required secrets (passed from caller via secrets: inherit or explicit mapping):
-#   ANTHROPIC_API_KEY   — Claude API key
+#   CLAUDE_CODE_OAUTH_TOKEN — Claude subscription token from `claude setup-token`;
+#                         the check runs on the Max/Pro plan, never an API key
 #
 # Optional secrets:
 #   SLACK_WEBHOOK_URL   — Incoming webhook for Slack notifications
@@ -56,7 +57,7 @@ on:
         default: "20"
         required: false
     secrets:
-      ANTHROPIC_API_KEY:
+      CLAUDE_CODE_OAUTH_TOKEN:
         required: false
       SLACK_WEBHOOK_URL:
         required: false
@@ -104,23 +105,23 @@ jobs:
           echo "| Trigger | \`${{ github.event_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Budget | \$${MAX_BUDGET_USD} |" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Verify ANTHROPIC_API_KEY is set
+      - name: Verify CLAUDE_CODE_OAUTH_TOKEN is set
         # Read the secret from env, never via ${{ }}: interpolation pastes it into the
         # generated script file instead of the process environment.
         run: |
-          if [[ -z "${ANTHROPIC_API_KEY}" ]]; then
+          if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ]]; then
             if [[ "${EVENT_NAME}" == "push" ]]; then
-              echo "::warning::ANTHROPIC_API_KEY not set — health-check will be skipped (push trigger)."
+              echo "::warning::CLAUDE_CODE_OAUTH_TOKEN not set — health-check will be skipped (push trigger)."
             else
-              echo "::error::ANTHROPIC_API_KEY secret is not set."
-              echo "Add it at: Settings → Secrets and variables → Actions → New repository secret"
+              echo "::error::CLAUDE_CODE_OAUTH_TOKEN secret is not set."
+              echo "Create it with \`claude setup-token\` (Claude subscription), then add it at: Settings → Secrets and variables → Actions → New repository secret"
               exit 1
             fi
           else
-            echo "✅ ANTHROPIC_API_KEY present"
+            echo "✅ CLAUDE_CODE_OAUTH_TOKEN present (Claude subscription)"
           fi
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
 
   # ── Health check ──────────────────────────────────────────────────────────────
@@ -284,7 +285,7 @@ jobs:
       - name: Run Claude headless status check
         id: claude
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GH_TOKEN: ${{ github.token }}
           GH_CONFIG_DIR: /home/runner/.config/gh
         run: |
@@ -295,7 +296,8 @@ jobs:
           CLAUDE_EXIT=0
           claude \
             --print \
-            --bare \
+            --setting-sources user \
+            --strict-mcp-config \
             --allowedTools \
               "Bash(gh pr list:*),Bash(gh pr checks:*),Bash(gh pr view:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh issue list:*),Bash(gh api:*),Bash(gh repo view:*),Bash(git log:*),Bash(git branch:*),Bash(git for-each-ref:*)" \
             --output-format json \

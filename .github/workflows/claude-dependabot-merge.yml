@@ -27,7 +27,8 @@
 #   6. Schedule and push triggers ALWAYS force dry-run regardless of input
 #
 # ─── Required secrets (passed by caller) ─────────────────────────────────────
-#   ANTHROPIC_API_KEY   — Claude API key (required)
+#   CLAUDE_CODE_OAUTH_TOKEN — Claude subscription token from `claude setup-token`
+#                         (required); the run uses the Max/Pro plan, never an API key
 #   SLACK_WEBHOOK_URL   — Slack incoming webhook URL (optional)
 #
 # Caller should use `secrets: inherit` to pass both transparently.
@@ -76,8 +77,8 @@ on:
         default: "20"
         required: false
     secrets:
-      ANTHROPIC_API_KEY:
-        description: "Claude API key"
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude subscription token from `claude setup-token`"
         required: false
       SLACK_WEBHOOK_URL:
         description: "Optional Slack webhook for completion notifications"
@@ -156,20 +157,25 @@ jobs:
             echo "| Slack notifications | ${SLACK_PRESENT} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Verify ANTHROPIC_API_KEY secret
+      - name: Verify CLAUDE_CODE_OAUTH_TOKEN secret
         id: key-check
+        # Read the secret from env, never via ${{ }}: interpolation pastes it into the
+        # generated script file instead of the process environment.
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [[ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]]; then
-            if [[ "${{ github.event_name }}" == "push" ]]; then
-              echo "::warning::ANTHROPIC_API_KEY not set — Claude evaluation skipped (push trigger is dry-run only)."
+          if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ]]; then
+            if [[ "${EVENT_NAME}" == "push" ]]; then
+              echo "::warning::CLAUDE_CODE_OAUTH_TOKEN not set — Claude evaluation skipped (push trigger is dry-run only)."
               echo "api_key_present=false" >> "$GITHUB_OUTPUT"
             else
-              echo "::error::ANTHROPIC_API_KEY secret is not set."
-              echo "Add it at: Settings → Secrets and variables → Actions → New repository secret"
+              echo "::error::CLAUDE_CODE_OAUTH_TOKEN secret is not set."
+              echo "Create it with \`claude setup-token\` (Claude subscription), then add it at: Settings → Secrets and variables → Actions → New repository secret"
               exit 1
             fi
           else
-            echo "✅ ANTHROPIC_API_KEY is present."
+            echo "✅ CLAUDE_CODE_OAUTH_TOKEN is present (Claude subscription)."
             echo "api_key_present=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -450,7 +456,7 @@ jobs:
       - name: Run Claude headless evaluation
         id: claude
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GH_TOKEN: ${{ github.token }}
           IS_LIVE: ${{ needs.safety-gate.outputs.is_live }}
         run: |
@@ -471,7 +477,8 @@ jobs:
           CLAUDE_EXIT=0
           claude \
             --print \
-            --bare \
+            --setting-sources user \
+            --strict-mcp-config \
             --allowedTools "$ALLOWED" \
             --output-format json \
             --max-budget-usd "${{ needs.safety-gate.outputs.max_budget }}" \
