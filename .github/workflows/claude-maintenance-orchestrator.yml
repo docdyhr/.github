@@ -368,6 +368,7 @@ jobs:
             --print \
             --setting-sources user \
             --strict-mcp-config \
+            --tools "Bash" \
             --allowedTools \
               "Bash(gh:*),Bash(jq:*),Bash(echo:*),Bash(cat:*),Bash(wc:*)" \
             --output-format json \

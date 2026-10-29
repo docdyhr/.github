@@ -479,6 +479,7 @@ jobs:
             --print \
             --setting-sources user \
             --strict-mcp-config \
+            --tools "Bash,Read" \
             --allowedTools "$ALLOWED" \
             --output-format json \
             --max-budget-usd "${{ needs.safety-gate.outputs.max_budget }}" \
