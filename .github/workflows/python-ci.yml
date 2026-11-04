@@ -128,10 +128,10 @@ jobs:
       - name: Set up virtualenv
         run: |
           if [ "${{ inputs.package-manager }}" = "uv" ]; then
-            # A restored .venv can point at an interpreter this runner lacks;
-            # current uv refuses an existing .venv without --allow-existing.
-            [ -x .venv/bin/python ] || rm -rf .venv
-            uv venv --allow-existing .venv
+            # Always build a fresh venv: uv refuses an existing .venv, and its own
+            # download cache (setup-uv enable-cache) keeps this fast without
+            # trusting executables restored from the actions cache.
+            uv venv --clear .venv
             echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
             uv pip install -r ${{ inputs.requirements-dev }}
             uv pip install -e .
@@ -178,10 +178,10 @@ jobs:
       - name: Set up virtualenv
         run: |
           if [ "${{ inputs.package-manager }}" = "uv" ]; then
-            # A restored .venv can point at an interpreter this runner lacks;
-            # current uv refuses an existing .venv without --allow-existing.
-            [ -x .venv/bin/python ] || rm -rf .venv
-            uv venv --allow-existing .venv
+            # Always build a fresh venv: uv refuses an existing .venv, and its own
+            # download cache (setup-uv enable-cache) keeps this fast without
+            # trusting executables restored from the actions cache.
+            uv venv --clear .venv
             echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
             uv pip install build twine
             uv pip install -e .
@@ -241,10 +241,10 @@ jobs:
       - name: Set up virtualenv
         run: |
           if [ "${{ inputs.package-manager }}" = "uv" ]; then
-            # A restored .venv can point at an interpreter this runner lacks;
-            # current uv refuses an existing .venv without --allow-existing.
-            [ -x .venv/bin/python ] || rm -rf .venv
-            uv venv --allow-existing .venv
+            # Always build a fresh venv: uv refuses an existing .venv, and its own
+            # download cache (setup-uv enable-cache) keeps this fast without
+            # trusting executables restored from the actions cache.
+            uv venv --clear .venv
             echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
             uv pip install -r ${{ inputs.requirements-dev }}
             uv pip install -e .
@@ -320,10 +320,10 @@ jobs:
       - name: Set up virtualenv
         run: |
           if [ "${{ inputs.package-manager }}" = "uv" ]; then
-            # A restored .venv can point at an interpreter this runner lacks;
-            # current uv refuses an existing .venv without --allow-existing.
-            [ -x .venv/bin/python ] || rm -rf .venv
-            uv venv --allow-existing .venv
+            # Always build a fresh venv: uv refuses an existing .venv, and its own
+            # download cache (setup-uv enable-cache) keeps this fast without
+            # trusting executables restored from the actions cache.
+            uv venv --clear .venv
             echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
             uv pip install -r requirements.txt
             uv pip install -e .
