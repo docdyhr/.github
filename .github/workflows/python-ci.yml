@@ -105,6 +105,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
+        id: py
         with:
           python-version: ${{ inputs.python-version }}
       - name: Install uv
@@ -120,7 +121,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: .venv
-          key: ${{ runner.os }}-${{ inputs.package-manager }}-venv-${{ hashFiles('**/requirements*.txt') }}
+          key: ${{ runner.os }}-py${{ steps.py.outputs.python-version }}-${{ inputs.package-manager }}-venv-${{ hashFiles('**/requirements*.txt') }}
       - name: Install system dependencies
         if: inputs.apt-deps != ''
         run: sudo apt-get update && sudo apt-get install -y ${{ inputs.apt-deps }}
@@ -132,6 +133,8 @@ jobs:
             uv pip install -r ${{ inputs.requirements-dev }}
             uv pip install -e .
           else
+            # A restored .venv can point at an interpreter this runner lacks.
+            [ -x .venv/bin/python ] || rm -rf .venv
             python -m venv .venv
             echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
             .venv/bin/pip install --upgrade pip
@@ -149,6 +152,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
+        id: py
         with:
           python-version: ${{ inputs.python-version }}
       - name: Install uv
@@ -164,7 +168,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: .venv
-          key: ${{ runner.os }}-${{ inputs.package-manager }}-venv-${{ hashFiles('**/requirements*.txt') }}
+          key: ${{ runner.os }}-py${{ steps.py.outputs.python-version }}-${{ inputs.package-manager }}-venv-${{ hashFiles('**/requirements*.txt') }}
       - name: Install system dependencies
         if: inputs.apt-deps != ''
         run: sudo apt-get update && sudo apt-get install -y ${{ inputs.apt-deps }}
@@ -176,6 +180,8 @@ jobs:
             uv pip install build twine
             uv pip install -e .
           else
+            # A restored .venv can point at an interpreter this runner lacks.
+            [ -x .venv/bin/python ] || rm -rf .venv
             python -m venv .venv
             echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
             .venv/bin/pip install --upgrade pip
@@ -203,6 +209,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
+        id: py
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install uv
@@ -218,7 +225,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: .venv
-          key: ${{ runner.os }}-py${{ matrix.python-version }}-${{ inputs.package-manager }}-venv-${{ hashFiles('**/requirements*.txt') }}
+          key: ${{ runner.os }}-py${{ steps.py.outputs.python-version }}-${{ inputs.package-manager }}-venv-${{ hashFiles('**/requirements*.txt') }}
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux' && inputs.apt-deps != ''
         run: sudo apt-get update && sudo apt-get install -y ${{ inputs.apt-deps }}
@@ -233,6 +240,8 @@ jobs:
             uv pip install -r ${{ inputs.requirements-dev }}
             uv pip install -e .
           else
+            # A restored .venv can point at an interpreter this runner lacks.
+            [ -x .venv/bin/python ] || rm -rf .venv
             python -m venv .venv
             echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
             .venv/bin/pip install --upgrade pip
@@ -288,6 +297,7 @@ jobs:
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v7
+        id: py
         with:
           python-version: ${{ inputs.python-version }}
       - name: Install uv
@@ -306,6 +316,8 @@ jobs:
             uv pip install -r requirements.txt
             uv pip install -e .
           else
+            # A restored .venv can point at an interpreter this runner lacks.
+            [ -x .venv/bin/python ] || rm -rf .venv
             python -m venv .venv
             echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
             .venv/bin/pip install --upgrade pip
